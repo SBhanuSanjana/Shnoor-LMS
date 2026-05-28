@@ -1,6 +1,24 @@
 import logo from "../assets/shnoor-logo.jpeg";
 import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+
 function Landing() {
+  const [studentsCount, setStudentsCount] = useState(0);
+  const [instructorsCount, setInstructorsCount] = useState(0);
+  const [courses, setCourses] = useState([]);
+  const [categories, setCategories] = useState([]);
+
+  useEffect(() => {
+    const approvedUsers = JSON.parse(localStorage.getItem("approvedUsers")) || [];
+    const savedCourses = JSON.parse(localStorage.getItem("courses")) || [];
+    const savedCategories = JSON.parse(localStorage.getItem("categories")) || [];
+
+    setStudentsCount(approvedUsers.filter(user => user.role === "Learner").length);
+    setInstructorsCount(approvedUsers.filter(user => user.role === "Instructor").length);
+    setCourses(savedCourses);
+    setCategories(savedCategories);
+  }, []);
+
   const features = [
     "Role-based LMS access for student, instructor, institute admin and super admin",
     "Subscription-controlled course access with free and premium plans",
@@ -9,10 +27,10 @@ function Landing() {
   ];
 
   const stats = [
-    { label: "Students Enrolled", value: 0 },
-    { label: "Courses Published", value: 0 },
+    { label: "Students Enrolled", value: studentsCount },
+    { label: "Courses Published", value: courses.length },
     { label: "Certificates Issued", value: 0 },
-    { label: "Instructors", value: 0 },
+    { label: "Instructors", value: instructorsCount },
   ];
 
   return (
@@ -106,7 +124,7 @@ function Landing() {
           <div className="max-w-3xl mx-auto text-center mb-12">
             <h2 className="text-4xl font-extrabold mt-3">Platform Features</h2>
             <p className="text-slate-600 mt-4">
-              Courses and categories will appear dynamically after they are created from dashboards.
+              Explore the core capabilities of our comprehensive learning management system.
             </p>
           </div>
 
@@ -120,6 +138,60 @@ function Landing() {
           </div>
         </div>
       </section>
+
+      {/* CATEGORIES SECTION */}
+      {categories.length > 0 && (
+        <section id="categories" className="py-20 bg-slate-50 border-t border-slate-200">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-extrabold mt-3">Top Categories</h2>
+              <p className="text-slate-600 mt-4">Explore courses across various disciplines.</p>
+            </div>
+            <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {categories.map((category, index) => (
+                <div key={index} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center hover:shadow-md transition-shadow">
+                  <h3 className="text-lg font-extrabold text-blue-950">{category.name || category}</h3>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* COURSES SECTION */}
+      {courses.length > 0 && (
+        <section id="courses" className="py-20 bg-white border-t border-slate-200">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-extrabold mt-3">Featured Courses</h2>
+              <p className="text-slate-600 mt-4">Browse our latest published courses.</p>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {courses.map((course, index) => (
+                <div key={index} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-lg transition-shadow">
+                  <div className="h-48 bg-slate-200 w-full flex items-center justify-center text-slate-400">
+                    {/* Placeholder for course image */}
+                    <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                  </div>
+                  <div className="p-6">
+                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-wide">
+                      {course.category || "General"}
+                    </span>
+                    <h3 className="text-xl font-extrabold mt-4 mb-2 text-slate-900">{course.title || "Course Title"}</h3>
+                    <p className="text-slate-600 text-sm mb-6 line-clamp-2">
+                      {course.description || "Learn the fundamentals in this comprehensive course."}
+                    </p>
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-100">
+                      <span className="font-bold text-slate-800">{course.instructor || "Instructor"}</span>
+                      <span className="font-bold text-emerald-600">{course.isFree ? "Free" : "Premium"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section id="pricing" className="py-20">
         <div className="max-w-6xl mx-auto px-6">
