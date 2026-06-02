@@ -17,16 +17,20 @@ function InstructorOverview() {
   useEffect(() => {
     const loadOverview = async () => {
       try {
-        const [resCourses, resSubmissions] = await Promise.all([
+        const [resCourses, resSubmissions, resStudents] = await Promise.all([
           api.get(`/api/courses/instructor/my-courses`),
-          api.get(`/api/courses/instructor/submissions`)
+          api.get(`/api/courses/instructor/submissions`),
+          api.get(`/api/courses/instructor/students`)
         ]);
         let coursesList = [];
         let subsList = [];
+        let studentsList = [];
         if ((resCourses.status >= 200 && resCourses.status < 300)) coursesList = resCourses.data;
         if ((resSubmissions.status >= 200 && resSubmissions.status < 300)) subsList = resSubmissions.data;
+        if ((resStudents.status >= 200 && resStudents.status < 300)) studentsList = resStudents.data;
+        
         const totalCourses = coursesList.length;
-        const activeStudents = coursesList.reduce((acc, c) => acc + (c.enrollments_count || 0), 0);
+        const activeStudents = coursesList.reduce((acc, c) => acc + (parseInt(c.enrollments_count) || 0), 0);
         const pendingSubmissions = subsList.filter(s => !s.is_graded).length;
         setStats([
           { label: "Total Courses", value: totalCourses.toString(), icon: <BookOpen className="text-blue-950" size={24} />, bgColor: "bg-blue-50" },
@@ -34,7 +38,14 @@ function InstructorOverview() {
           { label: "Pending Assignments", value: pendingSubmissions.toString(), icon: <Clock className="text-blue-950" size={24} />, bgColor: "bg-blue-50" },
           { label: "Unread Messages", value: "0", icon: <AlertCircle className="text-blue-950" size={24} />, bgColor: "bg-blue-50" },
         ]);
-        const courseCompletions = coursesList.reduce((acc, c) => acc + (c.completions_count || 0), 0);
+        
+        const courseCompletions = studentsList.filter(e => {
+          let total = 0;
+          e.course.modules?.forEach(m => { total += m.lessons?.length || 0; });
+          const completed = e.lesson_progress?.filter(p => p.is_completed).length || 0;
+          return total > 0 && Math.round((completed / total) * 100) === 100;
+        }).length;
+        
         const completionRate = activeStudents > 0 ? Math.round((courseCompletions / activeStudents) * 100) : 0;
         
         setTrendStats({
@@ -43,11 +54,21 @@ function InstructorOverview() {
           active: activeStudents,
           rate: completionRate
         });
-        const cData = coursesList.map(c => ({
-          name: c.title.length > 15 ? c.title.substring(0, 15) + '...' : c.title,
-          enrollments: c.enrollments_count || 0,
-          completions: c.completions_count || 0
-        }));
+        const cData = coursesList.map(c => {
+          const courseStudents = studentsList.filter(e => e.course.id === c.id);
+          const completions = courseStudents.filter(e => {
+            let total = 0;
+            e.course.modules?.forEach(m => { total += m.lessons?.length || 0; });
+            const completed = e.lesson_progress?.filter(p => p.is_completed).length || 0;
+            return total > 0 && Math.round((completed / total) * 100) === 100;
+          }).length;
+          
+          return {
+            name: c.title.length > 15 ? c.title.substring(0, 15) + '...' : c.title,
+            enrollments: parseInt(c.enrollments_count) || 0,
+            completions: completions
+          };
+        });
         setChartData(cData);
       } catch (e) { } finally {
         setLoading(false);

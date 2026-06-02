@@ -12,9 +12,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================================
 // MIDDLEWARE
-// ==========================================
+
 const authMiddleware = (roles = []) => {
   return (req, res, next) => {
     try {
@@ -39,15 +38,13 @@ const authMiddleware = (roles = []) => {
   };
 };
 
-// ==========================================
-// CONTROLLERS
-// ==========================================
 
-// --- Auth Controller ---
+// Auth Controller
 const registerUser = async (req, res) => {
   try {
-    const { email, password, fullName, role } = req.body;
-    const userRole = role || 'LEARNER';
+    const { email, password, full_name, fullName, role } = req.body;
+    const name = fullName || full_name;
+    const userRole = (role || 'LEARNER').toUpperCase();
 
     // Check if user exists
     const existingUserQuery = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
@@ -65,7 +62,7 @@ const registerUser = async (req, res) => {
       VALUES ($1, $2, $3, $4) 
       RETURNING id, email, full_name, role
     `;
-    const newUserQuery = await pool.query(insertQuery, [email, hashedPassword, fullName, userRole]);
+    const newUserQuery = await pool.query(insertQuery, [email, hashedPassword, name, userRole]);
     const user = newUserQuery.rows[0];
 
     res.status(201).json({ message: 'User registered successfully', userId: user.id });
@@ -96,6 +93,10 @@ const loginUser = async (req, res) => {
       return res.status(403).json({ error: 'Account is deactivated' });
     }
 
+    if (!user.is_approved) {
+      return res.status(403).json({ error: 'Account is pending admin approval. You will be able to login once approved.' });
+    }
+
     // Generate token
     const payload = {
       userId: user.id,
@@ -120,12 +121,24 @@ const loginUser = async (req, res) => {
   }
 };
 
-// --- Admin Controller ---
+// Admin Controller 
 const getPendingCourses = async (req, res) => {
-  if (req.user.role !== 'ORGANIZATION_ADMIN') return res.status(403).json({ error: 'Access denied' });
+  if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
   try {
-    const result = await pool.query('SELECT * FROM courses WHERE is_approved = false AND is_published = true');
+    const query = `
+      SELECT 
+        c.*,
+        json_build_object(
+          'id', u.id,
+          'full_name', u.full_name,
+          'email', u.email
+        ) AS instructor
+      FROM courses c
+      LEFT JOIN users u ON c.instructor_id = u.id
+      WHERE c.is_approved = false AND c.is_published = true
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -133,7 +146,7 @@ const getPendingCourses = async (req, res) => {
 };
 
 const reviewCourse = async (req, res) => {
-  if (req.user.role !== 'ORGANIZATION_ADMIN') return res.status(403).json({ error: 'Access denied' });
+  if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
   const { courseId } = req.params;
   const { action } = req.body;
@@ -154,7 +167,7 @@ const reviewCourse = async (req, res) => {
 };
 
 const getPendingCertificates = async (req, res) => {
-  if (req.user.role !== 'ORGANIZATION_ADMIN') return res.status(403).json({ error: 'Access denied' });
+  if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
   try {
     const result = await pool.query("SELECT * FROM certificate_requests WHERE status = 'PENDING'");
@@ -165,7 +178,7 @@ const getPendingCertificates = async (req, res) => {
 };
 
 const reviewCertificate = async (req, res) => {
-  if (req.user.role !== 'ORGANIZATION_ADMIN') return res.status(403).json({ error: 'Access denied' });
+  if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
   const { requestId } = req.params;
   const { action } = req.body;
@@ -185,10 +198,10 @@ const reviewCertificate = async (req, res) => {
   }
 };
 
-// --- Assessment Controller ---
+// Assessment Controller
 const createAssessment = async (req, res) => {
   if (req.user.role !== 'INSTRUCTOR') return res.status(403).json({ error: 'Access denied' });
-  
+
   const { courseId } = req.params;
   const { title, description } = req.body;
 
@@ -214,7 +227,7 @@ const submitAssessment = async (req, res) => {
   try {
     const assessmentRes = await pool.query('SELECT course_id FROM assessments WHERE id = $1', [assessmentId]);
     if (assessmentRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    
+
     const enrollCheck = await pool.query('SELECT id FROM enrollments WHERE student_id = $1 AND course_id = $2', [studentId, assessmentRes.rows[0].course_id]);
     if (enrollCheck.rows.length === 0) return res.status(403).json({ error: 'Not enrolled' });
 
@@ -250,7 +263,7 @@ const getInstructorSubmissions = async (req, res) => {
 
 const gradeSubmission = async (req, res) => {
   if (req.user.role !== 'INSTRUCTOR') return res.status(403).json({ error: 'Access denied' });
-  
+
   const { submissionId } = req.params;
   const { grade } = req.body;
 
@@ -304,10 +317,23 @@ const requestCertificate = async (req, res) => {
   }
 };
 
-// --- Course Controller ---
+// Course Controller
 const getApprovedCourses = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM courses WHERE is_approved = $1', [true]);
+    const query = `
+      SELECT 
+        c.*,
+        json_build_object(
+          'id', u.id,
+          'full_name', u.full_name,
+          'email', u.email
+        ) AS instructor,
+        (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS enrollments_count
+      FROM courses c
+      LEFT JOIN users u ON c.instructor_id = u.id
+      WHERE c.is_approved = $1
+    `;
+    const result = await pool.query(query, [true]);
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -343,31 +369,161 @@ const getInstructorCourses = async (req, res) => {
   }
 
   try {
-    const result = await pool.query('SELECT * FROM courses WHERE instructor_id = $1', [req.user.userId]);
-    res.json(result.rows);
+    const query = `
+      SELECT 
+        c.*,
+        (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS enrollments_count,
+        (
+          SELECT COUNT(*) 
+          FROM certificate_requests cr 
+          JOIN enrollments e ON cr.enrollment_id = e.id 
+          WHERE e.course_id = c.id AND cr.status = 'APPROVED'
+        ) AS completions_count
+      FROM courses c
+      WHERE c.instructor_id = $1
+    `;
+    const result = await pool.query(query, [req.user.userId]);
+    const courses = result.rows;
+
+    if (courses.length > 0) {
+      const courseIds = courses.map(c => c.id);
+
+      const modulesResult = await pool.query('SELECT * FROM modules WHERE course_id = ANY($1) ORDER BY "order" ASC, id ASC', [courseIds]);
+      const modules = modulesResult.rows;
+
+      if (modules.length > 0) {
+        const moduleIds = modules.map(m => m.id);
+
+        const quizzesResult = await pool.query('SELECT * FROM quizzes WHERE module_id = ANY($1) ORDER BY id ASC', [moduleIds]);
+        const quizzes = quizzesResult.rows;
+
+        if (quizzes.length > 0) {
+          const quizIds = quizzes.map(q => q.id);
+          const questionsResult = await pool.query('SELECT * FROM questions WHERE quiz_id = ANY($1) ORDER BY id ASC', [quizIds]);
+
+          quizzes.forEach(quiz => {
+            quiz.questions = questionsResult.rows.filter(q => q.quiz_id === quiz.id);
+          });
+        }
+
+        modules.forEach(module => {
+          module.quizzes = quizzes.filter(q => q.module_id === module.id);
+        });
+      }
+
+      courses.forEach(course => {
+        course.modules = modules.filter(m => m.course_id === course.id);
+      });
+    }
+
+    res.json(courses);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
+  }
+};
+
+const getInstructorStudents = async (req, res) => {
+  if (req.user.role !== 'INSTRUCTOR') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const enrollmentsRes = await pool.query(`
+      SELECT e.*, 
+             c.title as course_title,
+             u.full_name as student_name, u.email as student_email
+      FROM enrollments e
+      JOIN courses c ON e.course_id = c.id
+      JOIN users u ON e.student_id = u.id
+      WHERE c.instructor_id = $1
+    `, [req.user.userId]);
+
+    const enrollments = enrollmentsRes.rows;
+
+    if (enrollments.length > 0) {
+      const enrollmentIds = enrollments.map(e => e.id);
+      const courseIds = [...new Set(enrollments.map(e => e.course_id))];
+
+      const progressRes = await pool.query('SELECT enrollment_id, lesson_id, is_completed FROM lesson_progress WHERE enrollment_id = ANY($1)', [enrollmentIds]);
+      const quizAttRes = await pool.query('SELECT enrollment_id, quiz_id, passed, score, total_questions FROM quiz_attempts WHERE enrollment_id = ANY($1)', [enrollmentIds]);
+      const modulesRes = await pool.query('SELECT id, course_id FROM modules WHERE course_id = ANY($1)', [courseIds]);
+
+      const moduleIds = modulesRes.rows.map(m => m.id);
+      let lessons = [];
+      if (moduleIds.length > 0) {
+        const lessonsRes = await pool.query('SELECT id, module_id FROM lessons WHERE module_id = ANY($1)', [moduleIds]);
+        lessons = lessonsRes.rows;
+      }
+
+      for (let e of enrollments) {
+        e.student = { id: e.student_id, full_name: e.student_name, email: e.student_email };
+        e.course = { id: e.course_id, title: e.course_title };
+
+        e.lesson_progress = progressRes.rows.filter(p => p.enrollment_id === e.id);
+        e.quiz_attempts = quizAttRes.rows.filter(q => q.enrollment_id === e.id);
+
+        const eModules = modulesRes.rows.filter(m => m.course_id === e.course_id).map(m => {
+          return { ...m, lessons: lessons.filter(l => l.module_id === m.id) };
+        });
+        e.course.modules = eModules;
+      }
+    }
+
+    res.json(enrollments);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error fetching students' });
   }
 };
 
 const getCourseById = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM courses WHERE id = $1', [id]);
-    
-    if (result.rows.length === 0) {
+    const courseResult = await pool.query('SELECT * FROM courses WHERE id = $1', [id]);
+
+    if (courseResult.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    
-    res.json(result.rows[0]);
+
+    const course = courseResult.rows[0];
+
+    // Fetch modules
+    const modulesResult = await pool.query('SELECT * FROM modules WHERE course_id = $1 ORDER BY "order" ASC, id ASC', [id]);
+    const modules = modulesResult.rows;
+
+    if (modules.length > 0) {
+      const moduleIds = modules.map(m => m.id);
+
+      const lessonsResult = await pool.query(`SELECT * FROM lessons WHERE module_id = ANY($1) ORDER BY "order" ASC, id ASC`, [moduleIds]);
+      const quizzesResult = await pool.query(`SELECT * FROM quizzes WHERE module_id = ANY($1) ORDER BY id ASC`, [moduleIds]);
+
+      const quizzes = quizzesResult.rows;
+      if (quizzes.length > 0) {
+        const quizIds = quizzes.map(q => q.id);
+        const questionsResult = await pool.query(`SELECT * FROM questions WHERE quiz_id = ANY($1) ORDER BY id ASC`, [quizIds]);
+
+        quizzes.forEach(quiz => {
+          quiz.questions = questionsResult.rows.filter(q => q.quiz_id === quiz.id);
+        });
+      }
+
+      modules.forEach(module => {
+        module.lessons = lessonsResult.rows.filter(l => l.module_id === module.id);
+        module.quizzes = quizzes.filter(q => q.module_id === module.id);
+      });
+    }
+
+    course.modules = modules;
+
+    res.json(course);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
   }
 };
 
-// --- Enrollment Controller ---
+// Enrollment Controller
 const enrollCourse = async (req, res) => {
   const { courseId } = req.params;
   const studentId = req.user.userId;
@@ -395,7 +551,7 @@ const enrollCourse = async (req, res) => {
   }
 };
 
-// --- Lesson Controller ---
+// Lesson Controller 
 const createLesson = async (req, res) => {
   if (req.user.role !== 'INSTRUCTOR') {
     return res.status(403).json({ error: 'Only instructors can create lessons' });
@@ -412,11 +568,11 @@ const createLesson = async (req, res) => {
       WHERE m.id = $1
     `;
     const checkResult = await pool.query(checkQuery, [moduleId]);
-    
+
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Module not found' });
     }
-    
+
     if (checkResult.rows[0].instructor_id !== req.user.userId) {
       return res.status(403).json({ error: 'Access denied to this module' });
     }
@@ -439,7 +595,7 @@ const createLesson = async (req, res) => {
   }
 };
 
-// --- Module Controller ---
+// Module Controller
 const createModule = async (req, res) => {
   if (req.user.role !== 'INSTRUCTOR') {
     return res.status(403).json({ error: 'Only instructors can create modules' });
@@ -460,7 +616,7 @@ const createModule = async (req, res) => {
       RETURNING *
     `;
     const result = await pool.query(query, [courseId, title, order || 0]);
-    
+
     await pool.query('UPDATE courses SET is_approved = false, is_published = false WHERE id = $1', [courseId]);
 
     res.status(201).json(result.rows[0]);
@@ -497,7 +653,7 @@ const reorderModules = async (req, res) => {
   }
 };
 
-// --- Quiz Controller ---
+// Quiz Controller
 const createQuiz = async (req, res) => {
   if (req.user.role !== 'INSTRUCTOR') {
     return res.status(403).json({ error: 'Only instructors can create quizzes' });
@@ -514,7 +670,7 @@ const createQuiz = async (req, res) => {
       WHERE m.id = $1
     `;
     const checkResult = await pool.query(checkQuery, [moduleId]);
-    
+
     if (checkResult.rows.length === 0) return res.status(404).json({ error: 'Module not found' });
     if (checkResult.rows[0].instructor_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
 
@@ -587,9 +743,9 @@ const submitQuiz = async (req, res) => {
   }
 };
 
-// ==========================================
+
 // ROUTES
-// ==========================================
+
 
 // Auth Routes (/api/accounts)
 app.post('/api/accounts/register', registerUser);
@@ -598,31 +754,341 @@ app.get('/api/accounts/profile', authMiddleware(), (req, res) => {
   res.json({ message: 'Profile data', user: req.user });
 });
 
+// Super Admin User Controllers
+const getAllUsers = async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM users ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error fetching users' });
+  }
+};
+
+const approveUser = async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await pool.query('UPDATE users SET is_approved = true WHERE id = $1', [userId]);
+    res.json({ message: 'User approved' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error approving user' });
+  }
+};
+
+const deleteUser = async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    res.json({ message: 'User deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error deleting user' });
+  }
+};
+
+// Auth Admin Routes (/api/auth/admin)
+app.get('/api/auth/admin/users', authMiddleware(), getAllUsers);
+app.post('/api/auth/admin/users/:userId/approve', authMiddleware(), approveUser);
+app.delete('/api/auth/admin/users/:userId/delete', authMiddleware(), deleteUser);
+
 // Admin Routes (/api/admin)
-app.get('/api/admin/pending-courses', authMiddleware(['ORGANIZATION_ADMIN']), getPendingCourses);
-app.post('/api/admin/courses/:courseId/review', authMiddleware(['ORGANIZATION_ADMIN']), reviewCourse);
-app.get('/api/admin/pending-certificates', authMiddleware(['ORGANIZATION_ADMIN']), getPendingCertificates);
-app.post('/api/admin/certificates/:requestId/review', authMiddleware(['ORGANIZATION_ADMIN']), reviewCertificate);
+app.get('/api/admin/pending-courses', authMiddleware(['ORGANIZATION_ADMIN', 'ADMIN']), getPendingCourses);
+app.post('/api/admin/courses/:courseId/review', authMiddleware(['ORGANIZATION_ADMIN', 'ADMIN']), reviewCourse);
+app.get('/api/admin/pending-certificates', authMiddleware(['ORGANIZATION_ADMIN', 'ADMIN']), getPendingCertificates);
+app.post('/api/admin/certificates/:requestId/review', authMiddleware(['ORGANIZATION_ADMIN', 'ADMIN']), reviewCertificate);
 
 // Course Routes (/api/courses)
+const multer = require('multer');
+const fs = require('fs');
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
+const upload = multer({ dest: 'uploads/' });
+
+app.use('/uploads', express.static('uploads'));
+
 // Public/Learner routes
 app.get('/api/courses/', authMiddleware(), getApprovedCourses);
-app.get('/api/courses/:id', authMiddleware(), getCourseById);
+
+// Enrollments (must be before any :id/:courseId routes)
+app.get('/api/courses/enrollments', authMiddleware(), async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const enrollmentsRes = await pool.query(`
+      SELECT e.*, 
+             c.title as course_title, c.thumbnail_url, c.thumbnail_file, 
+             u.full_name as instructor_name
+      FROM enrollments e
+      JOIN courses c ON e.course_id = c.id
+      LEFT JOIN users u ON c.instructor_id = u.id
+      WHERE e.student_id = $1
+    `, [studentId]);
+
+    const enrollments = enrollmentsRes.rows;
+    for (let e of enrollments) {
+      e.course = {
+        id: e.course_id, title: e.course_title,
+        thumbnail_url: e.thumbnail_url, thumbnail_file: e.thumbnail_file,
+        instructor: { full_name: e.instructor_name }
+      };
+
+      // fetch modules
+      const modulesRes = await pool.query('SELECT * FROM modules WHERE course_id = $1 ORDER BY "order" ASC', [e.course_id]);
+      e.course.modules = modulesRes.rows;
+
+      if (e.course.modules.length > 0) {
+        const moduleIds = e.course.modules.map(m => m.id);
+        const lessonsRes = await pool.query(`SELECT * FROM lessons WHERE module_id = ANY($1) ORDER BY "order" ASC`, [moduleIds]);
+        const quizzesRes = await pool.query(`SELECT * FROM quizzes WHERE module_id = ANY($1)`, [moduleIds]);
+
+        // Fetch questions for each quiz
+        for (let quiz of quizzesRes.rows) {
+          const questionsRes = await pool.query('SELECT * FROM questions WHERE quiz_id = $1', [quiz.id]);
+          quiz.questions = questionsRes.rows;
+        }
+
+        e.course.modules.forEach(m => {
+          m.lessons = lessonsRes.rows.filter(l => l.module_id === m.id);
+          m.quizzes = quizzesRes.rows.filter(q => q.module_id === m.id);
+        });
+      }
+
+      // fetch progress
+      const progressRes = await pool.query('SELECT lesson_id as lesson, is_completed FROM lesson_progress WHERE enrollment_id = $1', [e.id]);
+      e.lesson_progress = progressRes.rows;
+
+      // fetch quiz attempts
+      const quizAttRes = await pool.query('SELECT quiz_id as quiz, passed, score, total_questions FROM quiz_attempts WHERE enrollment_id = $1', [e.id]);
+      e.quiz_attempts = quizAttRes.rows;
+    }
+    res.json(enrollments);
+  } catch (err) {
+    console.error('ENROLLMENTS ERROR:', err.message, err.stack);
+    res.status(500).json({ error: 'Server error', detail: err.message });
+  }
+});
+
+// Certificates (must be before :courseId routes)
+app.get('/api/courses/certificates', authMiddleware(), getCertificateRequests);
+app.get('/api/courses/instructor/my-courses', authMiddleware(['INSTRUCTOR']), getInstructorCourses);
+app.get('/api/courses/instructor/students', authMiddleware(['INSTRUCTOR']), getInstructorStudents);
+app.get('/api/courses/instructor/submissions', authMiddleware(['INSTRUCTOR']), getInstructorSubmissions);
 
 // Instructor routes
-app.post('/api/courses/', authMiddleware(['INSTRUCTOR']), createCourse);
-app.get('/api/courses/instructor/my-courses', authMiddleware(['INSTRUCTOR']), getInstructorCourses);
+app.post('/api/courses/', authMiddleware(['INSTRUCTOR']), upload.single('thumbnail_file'), async (req, res) => {
+  const { title, description, thumbnail_url } = req.body;
+  const instructorId = req.user.userId;
+  const thumbnailFile = req.file ? req.file.path : null;
+
+  try {
+    const query = `
+      INSERT INTO courses (title, description, thumbnail_url, thumbnail_file, instructor_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [title, description, thumbnail_url, thumbnailFile, instructorId]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error creating course' });
+  }
+});
+
+app.post('/api/courses/lessons/:lessonId/complete', authMiddleware(), async (req, res) => {
+  const { lessonId } = req.params;
+  const studentId = req.user.userId;
+
+  try {
+    // Get course ID for this lesson
+    const courseRes = await pool.query(`
+      SELECT c.id as course_id 
+      FROM lessons l 
+      JOIN modules m ON l.module_id = m.id 
+      JOIN courses c ON m.course_id = c.id 
+      WHERE l.id = $1
+    `, [lessonId]);
+
+    if (courseRes.rows.length === 0) return res.status(404).json({ error: 'Lesson not found' });
+    const courseId = courseRes.rows[0].course_id;
+
+    // Check enrollment
+    const enrollRes = await pool.query('SELECT id FROM enrollments WHERE student_id = $1 AND course_id = $2', [studentId, courseId]);
+    if (enrollRes.rows.length === 0) return res.status(403).json({ error: 'Not enrolled' });
+    const enrollmentId = enrollRes.rows[0].id;
+
+    // Insert or update lesson_progress
+    const upsertQuery = `
+      INSERT INTO lesson_progress (enrollment_id, lesson_id, is_completed)
+      VALUES ($1, $2, true)
+      ON CONFLICT (enrollment_id, lesson_id) 
+      DO UPDATE SET is_completed = true, updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+    const result = await pool.query(upsertQuery, [enrollmentId, lessonId]);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/courses/:courseId/progress', authMiddleware(), async (req, res) => {
+  const { courseId } = req.params;
+  const studentId = req.user.userId;
+
+  try {
+    const enrollRes = await pool.query('SELECT id FROM enrollments WHERE student_id = $1 AND course_id = $2', [studentId, courseId]);
+    if (enrollRes.rows.length === 0) return res.json({ completedLessons: 0, totalLessons: 0, progress: 0 });
+    const enrollmentId = enrollRes.rows[0].id;
+
+    const totalRes = await pool.query(`
+      SELECT count(l.id) as total 
+      FROM lessons l 
+      JOIN modules m ON l.module_id = m.id 
+      WHERE m.course_id = $1
+    `, [courseId]);
+    const totalLessons = parseInt(totalRes.rows[0].total) || 0;
+
+    const completedRes = await pool.query(`
+      SELECT count(lp.id) as completed 
+      FROM lesson_progress lp
+      JOIN lessons l ON lp.lesson_id = l.id
+      JOIN modules m ON l.module_id = m.id
+      WHERE lp.enrollment_id = $1 AND lp.is_completed = true AND m.course_id = $2
+    `, [enrollmentId, courseId]);
+    const completedLessons = parseInt(completedRes.rows[0].completed) || 0;
+
+    const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+
+    // Also fetch the specific completed lesson IDs so frontend can highlight them
+    const completedIdsRes = await pool.query(`
+      SELECT lesson_id FROM lesson_progress WHERE enrollment_id = $1 AND is_completed = true
+    `, [enrollmentId]);
+    const completedLessonIds = completedIdsRes.rows.map(r => r.lesson_id);
+
+    res.json({ completedLessons, totalLessons, progress, completedLessonIds });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/courses/:id', authMiddleware(['INSTRUCTOR']), upload.single('thumbnail_file'), async (req, res) => {
+  const { id } = req.params;
+  const { title, description, thumbnail_url, is_published } = req.body;
+  const instructorId = req.user.userId;
+  const thumbnailFile = req.file ? req.file.path : undefined;
+
+  try {
+    const courseCheck = await pool.query('SELECT * FROM courses WHERE id = $1 AND instructor_id = $2', [id, instructorId]);
+    if (courseCheck.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+
+    let updateFields = [];
+    let values = [];
+    let counter = 1;
+
+    if (title !== undefined) { updateFields.push(`title = $${counter++}`); values.push(title); }
+    if (description !== undefined) { updateFields.push(`description = $${counter++}`); values.push(description); }
+    if (thumbnail_url !== undefined) { updateFields.push(`thumbnail_url = $${counter++}`); values.push(thumbnail_url); }
+    if (thumbnailFile !== undefined) { updateFields.push(`thumbnail_file = $${counter++}`); values.push(thumbnailFile); }
+    if (is_published !== undefined) {
+      // If we are passing string "true" / "false" in FormData or json bool
+      const pub = (is_published === 'true' || is_published === true);
+      updateFields.push(`is_published = $${counter++}`); values.push(pub);
+    }
+
+    if (updateFields.length === 0) return res.json(courseCheck.rows[0]);
+
+    const query = `
+      UPDATE courses 
+      SET ${updateFields.join(', ')}
+      WHERE id = $${counter}
+      RETURNING *
+    `;
+    values.push(id);
+
+    const result = await pool.query(query, values);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error updating course' });
+  }
+});
 
 // Module routes
 app.post('/api/courses/:courseId/modules', authMiddleware(['INSTRUCTOR']), createModule);
 app.put('/api/courses/:courseId/modules/reorder', authMiddleware(['INSTRUCTOR']), reorderModules);
 
 // Lesson routes
-app.post('/api/courses/modules/:moduleId/lessons', authMiddleware(['INSTRUCTOR']), createLesson);
+app.post('/api/courses/modules/:moduleId/lessons', authMiddleware(['INSTRUCTOR']), upload.any(), async (req, res) => {
+  const { moduleId } = req.params;
+  const { title, content_type, text_content, video_url, audio_url, image_url, order } = req.body;
+
+  let video_file = null;
+  let audio_file = null;
+  let image_file = null;
+
+  if (req.files) {
+    req.files.forEach(f => {
+      if (f.fieldname === 'video_file') video_file = f.path;
+      if (f.fieldname === 'audio_file') audio_file = f.path;
+      if (f.fieldname === 'image_file') image_file = f.path;
+    });
+  }
+
+  try {
+    const checkQuery = `
+      SELECT c.instructor_id, c.id as course_id
+      FROM modules m
+      JOIN courses c ON m.course_id = c.id
+      WHERE m.id = $1
+    `;
+    const checkResult = await pool.query(checkQuery, [moduleId]);
+
+    if (checkResult.rows.length === 0) return res.status(404).json({ error: 'Module not found' });
+    if (checkResult.rows[0].instructor_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
+
+    const insertQuery = `
+      INSERT INTO lessons (module_id, title, content_type, text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, "order")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+    `;
+    const insertResult = await pool.query(insertQuery, [
+      moduleId, title, (content_type || 'TEXT').toUpperCase(), text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, order || 0
+    ]);
+
+    await pool.query('UPDATE courses SET is_approved = false, is_published = false WHERE id = $1', [checkResult.rows[0].course_id]);
+
+    res.status(201).json(insertResult.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error creating lesson' });
+  }
+});
 
 // Quiz routes
 app.post('/api/courses/modules/:moduleId/quizzes', authMiddleware(['INSTRUCTOR']), createQuiz);
 app.post('/api/courses/quizzes/:quizId/submit', authMiddleware(), submitQuiz);
+
+// Questions
+app.post('/api/courses/quizzes/:quizId/questions', authMiddleware(['INSTRUCTOR']), async (req, res) => {
+  const { quizId } = req.params;
+  const { text, question_type, option_a, option_b, option_c, option_d, correct_answers } = req.body;
+
+  try {
+    const insertQuery = `
+      INSERT INTO questions (quiz_id, text, question_type, option_a, option_b, option_c, option_d, correct_answers)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `;
+    const result = await pool.query(insertQuery, [quizId, text, (question_type || 'SINGLE').toUpperCase(), option_a, option_b, option_c, option_d, correct_answers]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error creating question' });
+  }
+});
 
 // Enrollment routes
 app.post('/api/courses/:courseId/enroll', authMiddleware(), enrollCourse);
@@ -630,17 +1096,18 @@ app.post('/api/courses/:courseId/enroll', authMiddleware(), enrollCourse);
 // Assessment routes
 app.post('/api/courses/:courseId/assessments', authMiddleware(['INSTRUCTOR']), createAssessment);
 app.post('/api/courses/assessments/:assessmentId/submit', authMiddleware(), submitAssessment);
-app.get('/api/courses/instructor/submissions', authMiddleware(['INSTRUCTOR']), getInstructorSubmissions);
 app.post('/api/courses/assessments/submissions/:submissionId/grade', authMiddleware(['INSTRUCTOR']), gradeSubmission);
 
 // Certificate routes
-app.get('/api/courses/certificates', authMiddleware(), getCertificateRequests);
 app.post('/api/courses/:courseId/certificate', authMiddleware(), requestCertificate);
 
+// Generic course ID route (Must be defined last to avoid shadowing other /api/courses/* routes)
+app.get('/api/courses/:id', authMiddleware(), getCourseById);
 
-// ==========================================
+
+
 // SERVER LISTEN
-// ==========================================
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

@@ -97,8 +97,8 @@ function StudentOverview() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className="grid grid-cols-1 gap-6">
+          <div className="space-y-6">
             {activeCourse && (
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-center mb-6">
@@ -151,16 +151,7 @@ function StudentOverview() {
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-bold text-slate-800">Live Workshops</h3>
-              </div>
-              <div className="text-center py-8 text-slate-400 text-sm font-medium">
-                No workshops scheduled for this week.
-              </div>
-            </div>
-          </div>
+
         </div>
       )}
     </div>

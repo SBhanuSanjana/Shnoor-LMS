@@ -42,23 +42,23 @@ function Login(){
     api.post("/api/accounts/login", {email:email,password:password})
     .then(res=>{
       const data = res.data;
-      sessionStorage.setItem("access",data.access);
-      sessionStorage.setItem("refresh",data.refresh);
-      sessionStorage.setItem("role",data.role);
-      sessionStorage.setItem("username",data.username);
-      sessionStorage.setItem("email",data.email);
+      sessionStorage.setItem("access",data.token);
+      sessionStorage.setItem("role",data.user.role.toLowerCase());
+      sessionStorage.setItem("email",data.user.email);
       const mappedUser={
-        name:data.full_name,
-        email:data.email,
-        role:data.role==="admin"?"Super Admin":data.role==="learner"?"Learner":data.role==="instructor"?"Instructor":"Organization Admin",
+        name:data.user.fullName,
+        email:data.user.email,
+        role:data.user.role==="ORGANIZATION_ADMIN"?"Organization Admin":data.user.role==="LEARNER"?"Learner":data.user.role==="INSTRUCTOR"?"Instructor":"Super Admin",
         status:"Approved"
       };
       sessionStorage.setItem("loggedInUser",JSON.stringify(mappedUser));
-      if(data.role==="admin"){
+      
+      const role = data.user.role.toLowerCase();
+      if(role==="admin"){
         navigate("/admin-dashboard");
-      }else if(data.role==="learner"){
+      }else if(role==="learner"){
         navigate("/student-dashboard");
-      }else if(data.role==="instructor"){
+      }else if(role==="instructor"){
         navigate("/instructor-dashboard");
       }else{
         navigate("/institute-dashboard");

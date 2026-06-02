@@ -29,8 +29,8 @@ function AdminDashboard() {
             id: u.id,
             name: u.full_name,
             email: u.email,
-            role: u.role === "learner" ? "Learner" : u.role === "instructor" ? "Instructor" : "Organization Admin",
-            learnerType: u.learner_type === "independent" ? "Independent Learner" : u.learner_type === "student" ? "Student" : u.learner_type === "employee" ? "Employee" : "",
+            role: (u.role || "").toLowerCase() === "learner" ? "Learner" : (u.role || "").toLowerCase() === "instructor" ? "Instructor" : (u.role || "").toLowerCase() === "admin" ? "Super Admin" : "Organization Admin",
+            learnerType: (u.learner_type || "").toLowerCase() === "independent" ? "Independent Learner" : (u.learner_type || "").toLowerCase() === "student" ? "Student" : (u.learner_type || "").toLowerCase() === "employee" ? "Employee" : "",
             organizationCode: u.organization_code,
             organizationName: u.organization_name,
             organizationType: u.organization_type,
@@ -349,10 +349,10 @@ function AdminDashboard() {
     "Settings",
   ];
   const learners = approvedUsers.filter(
-    (user) =>
-      user.role === "Learner" &&
-      (user.learnerType === "Independent Learner" ||
-        user.learnerType === "Student")
+    (user) => user.role === "Learner" && user.learnerType !== "Employee"
+  );
+  const learnerRequests = pendingUsers.filter(
+    (user) => user.role === "Learner" && user.learnerType !== "Employee"
   );
   const employeeRequests = pendingUsers.filter(
     (user) =>
@@ -371,10 +371,7 @@ function AdminDashboard() {
       user.learnerType === "Employee"
   );
   const allApprovedAccounts = approvedUsers.filter(
-    (user) =>
-      user.role === "Instructor" ||
-      user.role === "Organization Admin" ||
-      (user.role === "Learner" && user.learnerType === "Employee")
+    (user) => user.role !== "Super Admin"
   );
   return (
     <div className="min-h-screen bg-slate-100 flex">
@@ -617,12 +614,26 @@ function AdminDashboard() {
             );
           })()}
           {activePage === "Learner Management" && (
-            <UserTable
-              users={learners}
-              type="learner"
-              pendingCertificates={pendingCertificates}
-              handleCertificateAction={handleCertificateAction}
-            />
+            <div className="space-y-8">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-4">Pending Learner Approvals</h3>
+                  <ApprovalTable
+                    users={learnerRequests.map(u => ({...u, _status: 'pending'}))}
+                    approveUser={approveUser}
+                    rejectUser={rejectUser}
+                    type="learner"
+                  />
+                </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 mb-4">Approved Learners</h3>
+                <UserTable
+                  users={learners}
+                  type="learner"
+                  pendingCertificates={pendingCertificates}
+                  handleCertificateAction={handleCertificateAction}
+                />
+              </div>
+            </div>
           )}
           {activePage === "Employee Approvals" && (
             <ApprovalTable

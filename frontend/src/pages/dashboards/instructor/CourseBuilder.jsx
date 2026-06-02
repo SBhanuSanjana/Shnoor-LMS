@@ -74,7 +74,7 @@ function CourseBuilder(){
         if((res.status >= 200 && res.status < 300)){
           const data=res.data;
           alert("Course details saved!");
-          navigate(`instructor-dashboard/courses/${data.id}/build`);
+          navigate(`/instructor-dashboard/courses/${data.id}/build`);
           setStep(2);
         }else{
           alert("Failed to save details");
@@ -161,18 +161,14 @@ function CourseBuilder(){
     e.preventDefault();
     if(!qText.trim()||!optA||!optB||!correct)return;
     try{
-      const res=await fetch(`http://localhost:5000/api/courses/quizzes/${selectedQuizId}/questions`,{
-        method:"POST",
-        headers:{...getHeaders(),"Content-Type":"application/json"},
-        body:JSON.stringify({
-          text:qText,
-          question_type:qType,
-          option_a:optA,
-          option_b:optB,
-          option_c:optC,
-          option_d:optD,
-          correct_answers:correct
-        })
+      const res=await api.post(`/api/courses/quizzes/${selectedQuizId}/questions`, {
+        text:qText,
+        question_type:qType,
+        option_a:optA,
+        option_b:optB,
+        option_c:optC,
+        option_d:optD,
+        correct_answers:correct
       });
       if((res.status >= 200 && res.status < 300)){
         setQText('');
@@ -236,7 +232,7 @@ function CourseBuilder(){
     const updated=newModules.map((m,idx)=>({...m,order:idx}));
     setModules([...updated,...modules.filter(m=>m.title==="Final Quiz").map(m=>({...m,order:9999}))]);
     try{
-      await api.put(`/api/courses/${courseId}/modules`, {modules:updated.map(m=>({id:m.id,order:m.order}))});
+      await api.put(`/api/courses/${courseId}/modules/reorder`, {modules:updated.map(m=>({id:m.id,order:m.order}))});
       await loadCourse();
     }catch(e){}
   };

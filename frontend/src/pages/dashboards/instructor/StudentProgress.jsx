@@ -11,7 +11,7 @@ function StudentProgress(){
 
   const fetchEnrollments=async()=>{
     try{
-      const res=await api.get(`/api/courses/instructor/my-courses`);
+      const res=await api.get(`/api/courses/instructor/students`);
       if((res.status >= 200 && res.status < 300)){
         const data=res.data;
         setEnrollments(data);

@@ -22,10 +22,13 @@ function StudentCourses(){
   const loadData=async()=>{
     setLoading(true);
     try{
-      const[resEnroll,resCatalog]=await Promise.all([
-        api.get(`/api/courses/enrollments`),
-        api.get(`/api/courses/`)
-      ]);
+      const resCatalog=await api.get(`/api/courses/`);
+      if((resCatalog.status >= 200 && resCatalog.status < 300)){
+        setDiscoverCourses(resCatalog.data);
+      }
+    }catch(e){ console.error('Failed to load courses:', e); }
+    try{
+      const resEnroll=await api.get(`/api/courses/enrollments`);
       if((resEnroll.status >= 200 && resEnroll.status < 300)){
         const enrollData=resEnroll.data;
         setEnrollments(enrollData||[]);
@@ -34,13 +37,10 @@ function StudentCourses(){
           if(updated)setActivePlayer(updated);
         }
       }
-      if((resCatalog.status >= 200 && resCatalog.status < 300)){
-        setDiscoverCourses(resCatalog.data);
-      }
-    }catch(e){}finally{
-      setLoading(false);
-    }
+    }catch(e){ console.error('Failed to load enrollments:', e); }
+    setLoading(false);
   };
+
 
   useEffect(()=>{
     loadData();
@@ -415,7 +415,7 @@ function StudentCourses(){
       ):(
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDiscover.map(course=>{
-            const isEnrolled=enrollments.some(e=>e.course.id===course.id);
+            const isEnrolled=enrollments.some(e=>String(e.course.id) === String(course.id));
             return(
               <div key={course.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col group">
                 <div className="h-40 relative overflow-hidden bg-slate-100">
