@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { BookOpen, Users, Clock, AlertCircle, Calendar } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import api from '../../../api';
 
 function InstructorOverview() {
@@ -64,7 +64,7 @@ function InstructorOverview() {
           }).length;
           
           return {
-            name: c.title.length > 15 ? c.title.substring(0, 15) + '...' : c.title,
+            name: c.title,
             enrollments: parseInt(c.enrollments_count) || 0,
             completions: completions
           };
@@ -80,7 +80,7 @@ function InstructorOverview() {
     <div className="space-y-6">
       {loading ? (
         <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
         </div>
       ) : (
         <>
@@ -146,29 +146,19 @@ function InstructorOverview() {
             </div>
             <div className="h-80 w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorEnroll" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#172554" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#172554" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorComp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#0f172a', fontWeight: 600 }} axisLine={false} tickLine={false} dy={10} />
-                  <YAxis tick={{ fontSize: 12, fill: '#0f172a', fontWeight: 600 }} axisLine={false} tickLine={false} dx={-10} />
+                <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 30, left: 100, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                  <XAxis type="number" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#0f172a', fontWeight: 600 }} />
+                  <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#0f172a', fontWeight: 600 }} width={120} />
                   <Tooltip
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)', padding: '12px 16px' }}
                     itemStyle={{ fontSize: '13px', fontWeight: 600 }}
-                    labelStyle={{ fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '8px', textAlign: 'center' }}
+                    cursor={{ fill: '#f8fafc' }}
                   />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: '13px', fontWeight: 600, color: '#334155', paddingTop: '20px' }} />
-                  <Area type="monotone" name="New Enrollments" dataKey="enrollments" stroke="#172554" strokeWidth={3} fillOpacity={1} fill="url(#colorEnroll)" activeDot={{ r: 6, strokeWidth: 3, stroke: '#fff', shadow: '0 0 10px rgba(23,37,84,0.5)' }} />
-                  <Area type="monotone" name="Completions" dataKey="completions" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorComp)" activeDot={{ r: 6, strokeWidth: 3, stroke: '#fff' }} />
-                </AreaChart>
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '13px', fontWeight: 600, color: '#334155', paddingTop: '10px' }} />
+                  <Bar dataKey="enrollments" name="New Enrollments" fill="#172554" radius={[0, 4, 4, 0]} barSize={20} />
+                  <Bar dataKey="completions" name="Completions" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={20} />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </div>

@@ -3,14 +3,35 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const pool = require('./db');
+const http = require('http');
+const socketManager = require('./socketManager');
+const chatRoutes = require('./chatRoutes');
+const orgAdmin = require('./orgAdmin');
+const searchRoutes = require('./searchRoutes');
+const path = require('path');
 
 dotenv.config();
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+const rateLimit = require('express-rate-limit');
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Limit each IP to 1000 requests per `window` (here, per 15 minutes)
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
 
 // MIDDLEWARE
 
@@ -42,7 +63,12 @@ const authMiddleware = (roles = []) => {
 // Auth Controller
 const registerUser = async (req, res) => {
   try {
-    const { email, password, full_name, fullName, role } = req.body;
+    const { 
+      email, password, full_name, fullName, role, 
+      organization_code, learner_type, roll_number, employee_id, 
+      organization_type, organization_name, location, website 
+    } = req.body;
+    
     const name = fullName || full_name;
     const userRole = (role || 'LEARNER').toUpperCase();
 
@@ -56,13 +82,50 @@ const registerUser = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    let orgId = null;
+
+    if (userRole === 'ORGANIZATION_ADMIN') {
+      if (!organization_code || !organization_name) {
+        return res.status(400).json({ error: 'Organization name and code are required for Organization Admins' });
+      }
+      // Check if org code already exists
+      const orgCheck = await pool.query('SELECT * FROM organizations WHERE code = $1', [organization_code]);
+      if (orgCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'Organization code already exists. Please choose a unique code.' });
+      }
+      
+      // Create organization
+      const newOrg = await pool.query(
+        'INSERT INTO organizations (name, code, type, location, website) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [organization_name, organization_code, organization_type || 'institute', location || null, website || null]
+      );
+      orgId = newOrg.rows[0].id;
+
+    } else if (organization_code) {
+      // Find existing organization
+      const orgQuery = await pool.query('SELECT id FROM organizations WHERE code = $1', [organization_code]);
+      if (orgQuery.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid organization code' });
+      }
+      orgId = orgQuery.rows[0].id;
+    }
+
     // Insert new user
     const insertQuery = `
-      INSERT INTO users (email, password, full_name, role) 
-      VALUES ($1, $2, $3, $4) 
+      INSERT INTO users (email, password, full_name, role, organization_id, learner_type, roll_number, employee_id) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
       RETURNING id, email, full_name, role
     `;
-    const newUserQuery = await pool.query(insertQuery, [email, hashedPassword, name, userRole]);
+    const newUserQuery = await pool.query(insertQuery, [
+      email, 
+      hashedPassword, 
+      name, 
+      userRole, 
+      orgId, 
+      learner_type || null, 
+      roll_number || null, 
+      employee_id || null
+    ]);
     const user = newUserQuery.rows[0];
 
     res.status(201).json({ message: 'User registered successfully', userId: user.id });
@@ -102,6 +165,7 @@ const loginUser = async (req, res) => {
       userId: user.id,
       email: user.email,
       role: user.role,
+      organization_id: user.organization_id,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'your_secret_key', { expiresIn: '1d' });
@@ -113,11 +177,144 @@ const loginUser = async (req, res) => {
         email: user.email,
         fullName: user.full_name,
         role: user.role,
+        learnerType: user.learner_type,
+        profilePic: user.profile_pic,
       },
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Forgot Password Logic
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required.' });
+
+    const userQuery = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ message: 'User with this email does not exist.' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + 3600000); // 1 hour
+
+    await pool.query(
+      'UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE email = $3',
+      [hashedToken, expiresAt, email]
+    );
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
+      port: process.env.EMAIL_PORT || 587,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password/${token}`;
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || '"Shnoor LMS" <noreply@shnoorlms.com>',
+      to: email,
+      subject: 'Password Reset Request - Shnoor LMS',
+      text: `You requested a password reset. Please go to this link to reset your password: \n\n ${resetUrl} \n\n This link expires in 1 hour. If you did not request this, please ignore this email.`,
+      html: `
+        <div style="font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; background-color: #f8fafc; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+          <div style="background-color: #1e3a8a; padding: 32px 24px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">SHNOOR LMS</h1>
+            <p style="color: #93c5fd; margin: 8px 0 0; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Account Security</p>
+          </div>
+          
+          <div style="padding: 40px 32px; background-color: #ffffff;">
+            <h2 style="color: #0f172a; margin: 0 0 20px; font-size: 20px; font-weight: 700;">Password Reset Request</h2>
+            
+            <p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">
+              We received a request to reset the password associated with your Shnoor LMS account. If you made this request, please click the button below to securely set a new password.
+            </p>
+            
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${resetUrl}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2); transition: background-color 0.2s;">
+                Reset My Password
+              </a>
+            </div>
+            
+            <p style="color: #64748b; font-size: 14px; line-height: 1.5; margin: 0 0 16px;">
+              For your security, this link will automatically expire in <strong>1 hour</strong>.
+            </p>
+            
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 32px 0;">
+            
+            <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin: 0;">
+              If you did not request a password reset, no further action is required. Your password will remain unchanged. Please do not reply to this automated email.
+            </p>
+          </div>
+          
+          <div style="background-color: #f1f5f9; padding: 20px; text-align: center;">
+            <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+              &copy; ${new Date().getFullYear()} Shnoor International LLC. All rights reserved.
+            </p>
+          </div>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.json({ message: 'Password reset link sent to your email.' });
+
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error sending email.' });
+  }
+};
+
+const verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const userQuery = await pool.query(
+      'SELECT id FROM users WHERE reset_password_token = $1 AND reset_password_expires > NOW()',
+      [hashedToken]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.json({ valid: false });
+    }
+    return res.json({ valid: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+const resetPasswordWithToken = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const userQuery = await pool.query(
+      'SELECT id FROM users WHERE reset_password_token = $1 AND reset_password_expires > NOW()',
+      [hashedToken]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.status(400).json({ message: 'Invalid or expired token.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await pool.query(
+      'UPDATE users SET password = $1, reset_password_token = NULL, reset_password_expires = NULL WHERE id = $2',
+      [hashedPassword, userQuery.rows[0].id]
+    );
+
+    res.json({ message: 'Password successfully reset.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -246,7 +443,7 @@ const getInstructorSubmissions = async (req, res) => {
 
   try {
     const query = `
-      SELECT sub.*, a.title as assessment_title, u.email as student_email 
+      SELECT sub.*, a.title as assessment_title, u.email as student_email, c.title as course_title, u.full_name as student_name
       FROM assessment_submissions sub
       JOIN assessments a ON sub.assessment_id = a.id
       JOIN courses c ON a.course_id = c.id
@@ -750,14 +947,93 @@ const submitQuiz = async (req, res) => {
 // Auth Routes (/api/accounts)
 app.post('/api/accounts/register', registerUser);
 app.post('/api/accounts/login', loginUser);
-app.get('/api/accounts/profile', authMiddleware(), (req, res) => {
-  res.json({ message: 'Profile data', user: req.user });
+app.post('/api/forgot-password', forgotPassword);
+app.get('/api/verify-reset-token/:token', verifyResetToken);
+app.post('/api/reset-password-with-token', resetPasswordWithToken);
+app.get('/api/accounts/profile', authMiddleware(), async (req, res) => {
+  try {
+    const result = await pool.query('SELECT full_name, email, phone_number, role, is_active, profile_pic FROM users WHERE id = $1', [req.user.userId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching profile' });
+  }
+});
+
+app.put('/api/accounts/profile', authMiddleware(), async (req, res) => {
+  try {
+    const { full_name, phone_number, profile_pic } = req.body;
+    const result = await pool.query(
+      'UPDATE users SET full_name = $1, phone_number = $2, profile_pic = $3 WHERE id = $4 RETURNING full_name, email, phone_number, role, profile_pic',
+      [full_name, phone_number, profile_pic, req.user.userId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error updating profile' });
+  }
+});
+
+app.put('/api/accounts/password', authMiddleware(), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userQuery = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.userId]);
+    const user = userQuery.rows[0];
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Incorrect current password' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, req.user.userId]);
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error updating password' });
+  }
+});
+
+app.post('/api/accounts/streak', authMiddleware(), async (req, res) => {
+  try {
+    const updateQuery = `
+      UPDATE users 
+      SET 
+        streak_count = CASE 
+          WHEN last_login_date = CURRENT_DATE THEN streak_count
+          WHEN last_login_date = CURRENT_DATE - INTERVAL '1 day' THEN streak_count + 1
+          ELSE 1 
+        END,
+        last_login_date = CURRENT_DATE
+      WHERE id = $1
+      RETURNING streak_count
+    `;
+    const result = await pool.query(updateQuery, [req.user.userId]);
+    res.json({ streak_count: result.rows[0].streak_count || 1 });
+  } catch (err) {
+    console.error('Streak update error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Super Admin User Controllers
 const getAllUsers = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM users ORDER BY created_at DESC');
+    const query = `
+      SELECT u.*, 
+             o.name AS org_name, 
+             o.code AS org_code, 
+             o.type AS org_type, 
+             o.location AS org_location, 
+             o.website AS org_website
+      FROM users u
+      LEFT JOIN organizations o ON u.organization_id = o.id
+      ORDER BY u.created_at DESC
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -861,6 +1137,14 @@ app.get('/api/courses/enrollments', authMiddleware(), async (req, res) => {
       // fetch quiz attempts
       const quizAttRes = await pool.query('SELECT quiz_id as quiz, passed, score, total_questions FROM quiz_attempts WHERE enrollment_id = $1', [e.id]);
       e.quiz_attempts = quizAttRes.rows;
+
+      // fetch assessments
+      const assessRes = await pool.query('SELECT * FROM assessments WHERE course_id = $1 ORDER BY id ASC', [e.course_id]);
+      e.course.assessments = assessRes.rows;
+
+      // fetch assessment submissions
+      const subRes = await pool.query('SELECT * FROM assessment_submissions WHERE enrollment_id = $1', [e.id]);
+      e.assessment_submissions = subRes.rows;
     }
     res.json(enrollments);
   } catch (err) {
@@ -930,6 +1214,80 @@ app.post('/api/courses/lessons/:lessonId/complete', authMiddleware(), async (req
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/lessons/:lessonId/document', async (req, res) => {
+  const { lessonId } = req.params;
+  const { download } = req.query;
+  try {
+    const result = await pool.query('SELECT document_file, title FROM lessons WHERE id = $1', [lessonId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Lesson not found' });
+    
+    const lesson = result.rows[0];
+    if (!lesson.document_file) return res.status(404).json({ error: 'Document not found' });
+    
+    // Check if the document_file contains the full URL or just the path
+    const docPath = lesson.document_file.replace(/\\/g, '/');
+    let filePath;
+    if (docPath.startsWith('uploads/')) {
+      filePath = path.resolve(__dirname, docPath);
+    } else {
+      filePath = path.resolve(__dirname, 'uploads', docPath);
+    }
+
+    if (!require('fs').existsSync(filePath)) return res.status(404).json({ error: 'File missing on server' });
+
+    let ext = '.pdf';
+    try {
+      const buffer = Buffer.alloc(4);
+      const fd = require('fs').openSync(filePath, 'r');
+      require('fs').readSync(fd, buffer, 0, 4, 0);
+      require('fs').closeSync(fd);
+      
+      const magic = buffer.toString('hex');
+      if (buffer.toString('utf8', 0, 4) === '%PDF') ext = '.pdf';
+      else if (magic === '504b0304') ext = '.zip'; // Used for docx, xlsx, pptx, zip
+      else if (magic.startsWith('89504e47')) ext = '.png';
+      else if (magic.startsWith('ffd8ff')) ext = '.jpg';
+    } catch(e) {}
+
+    const filename = `${lesson.title.replace(/[^a-zA-Z0-9 ]/g, '')}${ext}`;
+
+    if (download === 'true') {
+      res.download(filePath, filename);
+    } else {
+      if (ext !== '.pdf') {
+        res.setHeader('Content-Type', 'text/html');
+        return res.send(`
+          <html><head><style>
+            body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f1f5f9; color: #475569; }
+            .container { text-align: center; }
+            svg { width: 48px; height: 48px; margin-bottom: 1rem; color: #94a3b8; display: inline-block; }
+            h3 { margin-bottom: 0.5rem; color: #1e293b; }
+            p { font-size: 0.875rem; }
+          </style></head><body>
+            <div class="container">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h3>Preview Not Available</h3>
+              <p>This document format cannot be previewed in the browser.<br>Please use the Download button below.</p>
+            </div>
+          </body></html>
+        `);
+      }
+
+      res.sendFile(filePath, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `inline; filename="${filename}"`
+        }
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching document' });
   }
 });
 
@@ -1023,17 +1381,19 @@ app.put('/api/courses/:courseId/modules/reorder', authMiddleware(['INSTRUCTOR'])
 // Lesson routes
 app.post('/api/courses/modules/:moduleId/lessons', authMiddleware(['INSTRUCTOR']), upload.any(), async (req, res) => {
   const { moduleId } = req.params;
-  const { title, content_type, text_content, video_url, audio_url, image_url, order } = req.body;
+  const { title, content_type, text_content, video_url, audio_url, image_url, document_url, order } = req.body;
 
   let video_file = null;
   let audio_file = null;
   let image_file = null;
+  let document_file = null;
 
   if (req.files) {
     req.files.forEach(f => {
       if (f.fieldname === 'video_file') video_file = f.path;
       if (f.fieldname === 'audio_file') audio_file = f.path;
       if (f.fieldname === 'image_file') image_file = f.path;
+      if (f.fieldname === 'document_file') document_file = f.path;
     });
   }
 
@@ -1050,12 +1410,12 @@ app.post('/api/courses/modules/:moduleId/lessons', authMiddleware(['INSTRUCTOR']
     if (checkResult.rows[0].instructor_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
 
     const insertQuery = `
-      INSERT INTO lessons (module_id, title, content_type, text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, "order")
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      INSERT INTO lessons (module_id, title, content_type, text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, document_url, document_file, "order")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *
     `;
     const insertResult = await pool.query(insertQuery, [
-      moduleId, title, (content_type || 'TEXT').toUpperCase(), text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, order || 0
+      moduleId, title, (content_type || 'TEXT').toUpperCase(), text_content, video_url, video_file, audio_url, audio_file, image_url, image_file, document_url, document_file, order || 0
     ]);
 
     await pool.query('UPDATE courses SET is_approved = false, is_published = false WHERE id = $1', [checkResult.rows[0].course_id]);
@@ -1104,12 +1464,270 @@ app.post('/api/courses/:courseId/certificate', authMiddleware(), requestCertific
 // Generic course ID route (Must be defined last to avoid shadowing other /api/courses/* routes)
 app.get('/api/courses/:id', authMiddleware(), getCourseById);
 
+// Leaderboard API
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const { courseId } = req.query;
+    let query = `
+      SELECT 
+        u.id, u.full_name, u.email, u.streak_count,
+        (SELECT COUNT(*) FROM enrollments e2 WHERE e2.student_id = u.id) as courses_enrolled,
+        (SELECT COUNT(*) FROM lesson_progress lp JOIN enrollments e3 ON lp.enrollment_id = e3.id WHERE e3.student_id = u.id AND lp.is_completed = true) as lessons_completed,
+        (SELECT COUNT(*) FROM quiz_attempts qa JOIN enrollments e4 ON qa.enrollment_id = e4.id WHERE e4.student_id = u.id AND qa.passed = true) as quizzes_passed,
+        (SELECT COUNT(*) FROM certificate_requests cr JOIN enrollments e5 ON cr.enrollment_id = e5.id WHERE e5.student_id = u.id AND cr.status = 'APPROVED') as courses_completed
+      FROM users u
+      WHERE u.role = 'LEARNER'
+    `;
+    let params = [];
+    if (courseId) {
+      query += ` AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = u.id AND e.course_id = $1)`;
+      params.push(courseId);
+    }
 
+    query += ` ORDER BY quizzes_passed DESC, courses_completed DESC, lessons_completed DESC LIMIT 50`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Leaderboard error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- PUBLIC STATS ---
+app.get('/api/public/stats', async (req, res) => {
+  try {
+    const activeUsersResult = await pool.query("SELECT COUNT(*) FROM users WHERE is_active = true");
+    const publishedCoursesResult = await pool.query("SELECT COUNT(*) FROM courses WHERE is_published = true");
+    const certificatesIssuedResult = await pool.query("SELECT COUNT(*) FROM certificate_requests WHERE status = 'APPROVED'");
+    const expertInstructorsResult = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'INSTRUCTOR' AND is_active = true");
+
+    res.json({
+      activeUsers: parseInt(activeUsersResult.rows[0].count, 10),
+      publishedCourses: parseInt(publishedCoursesResult.rows[0].count, 10),
+      certificatesIssued: parseInt(certificatesIssuedResult.rows[0].count, 10),
+      expertInstructors: parseInt(expertInstructorsResult.rows[0].count, 10)
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching stats' });
+  }
+});
+
+// --- SUBSCRIPTIONS & PLANS ---
+app.get('/api/plans', async (req, res) => {
+  try {
+    const { plan_type } = req.query;
+    let query = 'SELECT * FROM subscription_plans';
+    let params = [];
+    if (plan_type) {
+      query += ' WHERE plan_type = $1';
+      params.push(plan_type);
+    }
+    query += ' ORDER BY price ASC';
+    const result = await pool.query(query, params);
+    
+    // Fetch features for each plan
+    const plans = result.rows;
+    for (let plan of plans) {
+      const featuresRes = await pool.query('SELECT feature_name, feature_value FROM plan_features WHERE plan_id = $1', [plan.id]);
+      plan.features = featuresRes.rows;
+    }
+    res.json(plans);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching plans' });
+  }
+});
+
+app.post('/api/plans', authMiddleware(['ADMIN', 'SUPER_ADMIN']), async (req, res) => {
+  try {
+    const { name, description, plan_type, price, billing_cycle, duration_months, features } = req.body;
+    
+    const insertPlan = await pool.query(
+      'INSERT INTO subscription_plans (name, description, plan_type, price, billing_cycle, duration_months) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, description, plan_type || 'learner', price, billing_cycle || 'monthly', duration_months || 1]
+    );
+    const plan = insertPlan.rows[0];
+
+    if (features && Array.isArray(features)) {
+      for (let f of features) {
+        await pool.query(
+          'INSERT INTO plan_features (plan_id, feature_name, feature_value) VALUES ($1, $2, $3)',
+          [plan.id, f.feature_name, f.feature_value]
+        );
+      }
+    }
+    res.status(201).json(plan);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error creating plan' });
+  }
+});
+
+app.put('/api/plans/:id', authMiddleware(['ADMIN', 'SUPER_ADMIN']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, plan_type, price, billing_cycle, duration_months, features } = req.body;
+    
+    const updatePlan = await pool.query(
+      'UPDATE subscription_plans SET name = $1, description = $2, plan_type = $3, price = $4, billing_cycle = $5, duration_months = $6 WHERE id = $7 RETURNING *',
+      [name, description, plan_type || 'learner', price, billing_cycle || 'monthly', duration_months || 1, id]
+    );
+
+    if (updatePlan.rows.length === 0) return res.status(404).json({ error: 'Plan not found' });
+    const plan = updatePlan.rows[0];
+
+    // Replace features
+    await pool.query('DELETE FROM plan_features WHERE plan_id = $1', [id]);
+    if (features && Array.isArray(features)) {
+      for (let f of features) {
+        await pool.query(
+          'INSERT INTO plan_features (plan_id, feature_name, feature_value) VALUES ($1, $2, $3)',
+          [plan.id, f.feature_name, f.feature_value]
+        );
+      }
+    }
+    res.json(plan);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error updating plan' });
+  }
+});
+
+app.delete('/api/plans/:id', authMiddleware(['ADMIN', 'SUPER_ADMIN']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM subscription_plans WHERE id = $1', [id]);
+    res.json({ message: 'Plan deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error deleting plan' });
+  }
+});
+
+app.get('/api/subscriptions/me', authMiddleware(), async (req, res) => {
+  try {
+    let query;
+    let params;
+    if (req.user.role === 'ORGANIZATION_ADMIN' && req.user.organization_id) {
+       query = 'SELECT s.*, p.name as plan_name, p.plan_type, p.price FROM subscriptions s JOIN subscription_plans p ON s.plan_id = p.id WHERE s.organization_id = $1 AND s.status = $2 ORDER BY s.end_date DESC LIMIT 1';
+       params = [req.user.organization_id, 'active'];
+    } else {
+       query = 'SELECT s.*, p.name as plan_name, p.plan_type, p.price FROM subscriptions s JOIN subscription_plans p ON s.plan_id = p.id WHERE s.user_id = $1 AND s.status = $2 ORDER BY s.end_date DESC LIMIT 1';
+       params = [req.user.userId, 'active'];
+    }
+
+    const subRes = await pool.query(query, params);
+    if (subRes.rows.length === 0) return res.json(null);
+    
+    const subscription = subRes.rows[0];
+    const featuresRes = await pool.query('SELECT feature_name, feature_value FROM plan_features WHERE plan_id = $1', [subscription.plan_id]);
+    subscription.features = featuresRes.rows;
+
+    res.json(subscription);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching subscription' });
+  }
+});
+
+app.post('/api/subscriptions', authMiddleware(), async (req, res) => {
+  try {
+    const { plan_id } = req.body;
+    // Mock Payment: Accept the plan_id and automatically subscribe the user
+    
+    const planRes = await pool.query('SELECT * FROM subscription_plans WHERE id = $1', [plan_id]);
+    if (planRes.rows.length === 0) return res.status(404).json({ error: 'Plan not found' });
+    const plan = planRes.rows[0];
+
+    const isOrg = req.user.role === 'ORGANIZATION_ADMIN';
+    const orgId = isOrg ? req.user.organization_id : null;
+    const userId = req.user.userId;
+
+    // Calculate end date based on duration_months
+    const endDate = new Date();
+    endDate.setMonth(endDate.getMonth() + plan.duration_months);
+
+    // End previous active subscriptions
+    if (isOrg) {
+      await pool.query('UPDATE subscriptions SET status = $1 WHERE organization_id = $2', ['expired', orgId]);
+    } else {
+      await pool.query('UPDATE subscriptions SET status = $1 WHERE user_id = $2', ['expired', userId]);
+    }
+
+    const insertSub = await pool.query(
+      'INSERT INTO subscriptions (user_id, organization_id, plan_id, end_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [userId, orgId, plan_id, endDate, 'active']
+    );
+
+    // If the plan is paid, log a real transaction in the payments table
+    if (parseFloat(plan.price) > 0) {
+      const transactionId = 'TXN-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+      await pool.query(
+        'INSERT INTO payments (user_id, organization_id, subscription_id, amount, transaction_id, status) VALUES ($1, $2, $3, $4, $5, $6)',
+        [userId, orgId, insertSub.rows[0].id, plan.price, transactionId, 'SUCCESS']
+      );
+    }
+
+    res.status(201).json(insertSub.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error subscribing' });
+  }
+});
+
+// --- ANNOUNCEMENTS ---
+const getAnnouncements = async (req, res) => {
+  try {
+    const orgId = req.user.organization_id || null;
+    let query = "SELECT * FROM announcements WHERE ";
+    let params = [];
+
+    if (orgId) {
+      query += "(organization_id = $1 OR organization_id IS NULL) AND id NOT IN (SELECT announcement_id FROM user_hidden_announcements WHERE user_id = $2)";
+      params = [orgId, req.user.userId];
+    } else {
+      query += "organization_id IS NULL AND id NOT IN (SELECT announcement_id FROM user_hidden_announcements WHERE user_id = $1)";
+      params = [req.user.userId];
+    }
+
+    query += " ORDER BY created_at DESC";
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching announcements' });
+  }
+};
+
+app.get('/api/learner/announcements', authMiddleware(['LEARNER', 'STUDENT', 'EMPLOYEE']), getAnnouncements);
+app.get('/api/instructor/announcements', authMiddleware(['INSTRUCTOR']), getAnnouncements);
+app.get('/api/admin/announcements', authMiddleware(['ADMIN']), async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM announcements WHERE author_role = 'SUPER_ADMIN' ORDER BY created_at DESC");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error fetching announcements' });
+  }
+});
+
+const globalPracticeRoutes = require('./globalPracticeRoutes');
+const adminReportsRoutes = require('./adminReportsRoutes');
+app.use('/api/chat', authMiddleware(), chatRoutes(upload));
+app.use('/api/org-admin', orgAdmin(authMiddleware));
+app.use('/api/search', authMiddleware(), searchRoutes());
+app.use('/api/practice-arenas', globalPracticeRoutes(authMiddleware));
+app.use('/api/admin/reports', adminReportsRoutes(authMiddleware));
 
 // SERVER LISTEN
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+socketManager.initSocket(server);
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

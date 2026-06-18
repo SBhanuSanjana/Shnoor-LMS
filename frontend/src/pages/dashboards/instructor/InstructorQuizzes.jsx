@@ -1,19 +1,22 @@
 import React,{useState,useEffect} from 'react';
-import {useNavigate} from 'react-router-dom';
+import {useNavigate, useLocation} from 'react-router-dom';
 import {ClipboardList,Plus,Search,Edit,BookOpen,HelpCircle,X} from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import api from '../../../api';
 
 function InstructorQuizzes(){
   const navigate=useNavigate();
+  const location = useLocation();
   const[courses,setCourses]=useState([]);
   const[quizzes,setQuizzes]=useState([]);
   const[loading,setLoading]=useState(true);
-  const[search,setSearch]=useState('');
+  const[search,setSearch]=useState(location.state?.searchTerm || '');
   const[showCreateModal,setShowCreateModal]=useState(false);
 
   const[quizTitle,setQuizTitle]=useState('');
   const[selectedCourseId,setSelectedCourseId]=useState('');
   const[selectedModuleId,setSelectedModuleId]=useState('');
+  const[quizAnalytics,setQuizAnalytics]=useState([]);
 
 
   const fetchQuizzesAndCourses=async()=>{
@@ -39,7 +42,23 @@ function InstructorQuizzes(){
         });
         setQuizzes(extracted);
       }
-    }catch(e){}finally{
+    }catch(e){
+      console.error(e);
+    }
+
+    try {
+      const analyticsRes = await api.get('/api/courses/instructor/analytics/quizzes');
+      if(analyticsRes.status >= 200 && analyticsRes.status < 300) {
+        const formattedAnalytics = analyticsRes.data.map(q => ({
+          ...q,
+          pending_count: Math.max(0, parseInt(q.total_enrolled) - parseInt(q.submitted_count)),
+          submitted_count: parseInt(q.submitted_count)
+        }));
+        setQuizAnalytics(formattedAnalytics);
+      }
+    }catch(e){
+      console.error(e);
+    }finally{
       setLoading(false);
     }
   };
@@ -89,7 +108,7 @@ function InstructorQuizzes(){
         </div>
         <button 
           onClick={()=>setShowCreateModal(true)}
-          className="bg-blue-950 hover:bg-blue-900 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+          className="bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
         >
           <Plus size={18} />
           Create Quiz
@@ -125,6 +144,31 @@ function InstructorQuizzes(){
           </div>
         </div>
       </div>
+
+      {quizAnalytics.length > 0 && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-800 mb-4">Quiz Engagement Analytics</h3>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={quizAnalytics}
+                margin={{ top: 20, right: 30, left: 0, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="quiz_title" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} allowDecimals={false} />
+                <Tooltip 
+                  cursor={{fill: '#f1f5f9'}}
+                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'}}
+                />
+                <Legend iconType="circle" />
+                <Bar dataKey="submitted_count" name="Written (Submitted)" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} maxBarSize={60} />
+                <Bar dataKey="pending_count" name="Pending" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={60} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50">
@@ -249,7 +293,7 @@ function InstructorQuizzes(){
 
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3 mt-6">
                 <button type="button" onClick={()=>setShowCreateModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Cancel</button>
-                <button type="submit" className="px-5 py-2.5 bg-blue-950 hover:bg-blue-900 text-white rounded-xl font-bold transition-colors shadow-md">Save and Add Questions</button>
+                <button type="submit" className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] rounded-xl font-bold transition-colors shadow-md">Save and Add Questions</button>
               </div>
             </form>
           </div>

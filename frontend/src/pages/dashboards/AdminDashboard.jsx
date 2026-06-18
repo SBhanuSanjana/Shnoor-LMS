@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import logo from "../../assets/shnoor-logo.jpeg";
 import api from '../../api';
-const isTokenValid=(t)=>{
-  if(!t)return false;
-  try{
-    const p=JSON.parse(atob(t.split(".")[1]));
-    return p.exp*1000>Date.now();
-  }catch(e){
+import SubscriptionPlansView from "./SubscriptionPlansView";
+import GlobalSearch from "../../components/GlobalSearch";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+const isTokenValid = (t) => {
+  if (!t) return false;
+  try {
+    const p = JSON.parse(atob(t.split(".")[1]));
+    return p.exp * 1000 > Date.now();
+  } catch (e) {
     return false;
   }
 };
+import InstituteAnnouncements from "./institute/InstituteAnnouncements";
+import ChatLayout from "../chat/ChatLayout";
+import { chatService } from "../../services/chatService";
+import SuperAdminReports from "./SuperAdminReports";
 function AdminDashboard() {
   const navigate = useNavigate();
   const [activePage, setActivePage] = useState("Overview");
@@ -19,67 +27,109 @@ function AdminDashboard() {
   const [pendingCourses, setPendingCourses] = useState([]);
   const [approvedCourses, setApprovedCourses] = useState([]);
   const [pendingCertificates, setPendingCertificates] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [profilePic, setProfilePic] = useState(sessionStorage.getItem("profile_pic"));
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state && location.state.activePage) {
+      setActivePage(location.state.activePage);
+      // clear state so it doesn't get stuck
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const count = await chatService.getUnreadCount();
+        setUnreadCount(count);
+      } catch (err) { }
+    };
+    const token = sessionStorage.getItem("access");
+    if (isTokenValid(token)) {
+      fetchUnread();
+      const interval = setInterval(fetchUnread, 30000);
+      return () => clearInterval(interval);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setProfilePic(sessionStorage.getItem("profile_pic"));
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   const loadUsers = () => {
     api.get(`/api/auth/admin/users`)
-    .then(res => {
-      if (res.status >= 200 && res.status < 300) {
-        const data = res.data;
+      .then(res => {
+        if (res.status >= 200 && res.status < 300) {
+          const data = res.data;
           const mapped = data.map(u => ({
             id: u.id,
             name: u.full_name,
             email: u.email,
             role: (u.role || "").toLowerCase() === "learner" ? "Learner" : (u.role || "").toLowerCase() === "instructor" ? "Instructor" : (u.role || "").toLowerCase() === "admin" ? "Super Admin" : "Organization Admin",
             learnerType: (u.learner_type || "").toLowerCase() === "independent" ? "Independent Learner" : (u.learner_type || "").toLowerCase() === "student" ? "Student" : (u.learner_type || "").toLowerCase() === "employee" ? "Employee" : "",
-            organizationCode: u.organization_code,
-            organizationName: u.organization_name,
-            organizationType: u.organization_type,
+            organizationCode: u.org_code,
+            organizationName: u.org_name,
+            organizationType: u.org_type,
             rollNumber: u.roll_number,
             employeeId: u.employee_id,
-            location: u.location,
-            website: u.website,
+            location: u.org_location,
+            website: u.org_website,
             created_at: u.created_at,
             is_approved: u.is_approved
           }));
           setPendingUsers(mapped.filter(u => !u.is_approved));
           setApprovedUsers(mapped.filter(u => u.is_approved));
-      }
-    })
-    .catch(() => {});
+        }
+      })
+      .catch(() => { });
   };
   const loadPendingCourses = () => {
     api.get(`/api/admin/pending-courses`)
-    .then(res => {
-      if (res.status >= 200 && res.status < 300) setPendingCourses(res.data);
-    })
-    .catch(() => {});
+      .then(res => {
+        if (res.status >= 200 && res.status < 300) setPendingCourses(res.data);
+      })
+      .catch(() => { });
   };
   const loadApprovedCourses = () => {
     api.get(`/api/courses/`)
-    .then(res => {
-      if (res.status >= 200 && res.status < 300) setApprovedCourses(res.data);
-    })
-    .catch(() => {});
+      .then(res => {
+        if (res.status >= 200 && res.status < 300) setApprovedCourses(res.data);
+      })
+      .catch(() => { });
   };
   const loadPendingCertificates = () => {
     api.get(`/api/admin/pending-certificates`)
-    .then(res => {
-      if (res.status >= 200 && res.status < 300) setPendingCertificates(res.data);
-    })
-    .catch(() => {});
+      .then(res => {
+        if (res.status >= 200 && res.status < 300) setPendingCertificates(res.data);
+      })
+      .catch(() => { });
+  };
+  const loadPayments = () => {
+    api.get(`/api/admin/reports/payments`)
+      .then(res => {
+        if (res.status >= 200 && res.status < 300) setPayments(res.data);
+      })
+      .catch(() => { });
   };
   useEffect(() => {
-    const token=sessionStorage.getItem("access");
-    const role=sessionStorage.getItem("role");
-    if(!isTokenValid(token)){
+    const token = sessionStorage.getItem("access");
+    const role = sessionStorage.getItem("role");
+    if (!isTokenValid(token)) {
       sessionStorage.clear();
       navigate("/login");
-    } else if (role !== "admin") {
-      if (role === "learner") {
+    } else if (role?.toLowerCase() !== "admin") {
+      if (role?.toLowerCase() === "learner") {
         navigate("/student-dashboard");
-      } else if (role === "organization_admin" || role === "manager") {
+      } else if (role?.toLowerCase() === "organization_admin" || role?.toLowerCase() === "manager") {
         navigate("/institute-dashboard");
-      } else if (role === "instructor") {
+      } else if (role?.toLowerCase() === "instructor") {
         navigate("/instructor-dashboard");
       }
     } else {
@@ -87,123 +137,130 @@ function AdminDashboard() {
       loadPendingCourses();
       loadApprovedCourses();
       loadPendingCertificates();
+      loadPayments();
     }
   }, [navigate, activePage]);
   const approveUser = (email) => {
     const user = [...pendingUsers, ...approvedUsers].find(u => u.email === email);
     if (!user) return;
     api.post(`/api/auth/admin/users/${user.id}/approve`)
-    .then(res => {
-      if ((res.status >= 200 && res.status < 300)) {
-        alert("User approved successfully");
-        loadUsers();
-      }
-    })
-    .catch(() => {});
+      .then(res => {
+        if ((res.status >= 200 && res.status < 300)) {
+          alert("User approved successfully");
+          loadUsers();
+        }
+      })
+      .catch(() => { });
   };
   const rejectUser = (email) => {
     const user = [...pendingUsers, ...approvedUsers].find(u => u.email === email);
     if (!user) return;
     api.delete(`/api/auth/admin/users/${user.id}/delete`)
-    .then(res => {
-      if ((res.status >= 200 && res.status < 300)) {
-        alert("User rejected and deleted");
-        loadUsers();
-      }
-    })
-    .catch(() => {});
+      .then(res => {
+        if ((res.status >= 200 && res.status < 300)) {
+          alert("User rejected and deleted");
+          loadUsers();
+        }
+      })
+      .catch(() => { });
   };
   const handleCourseAction = (id, action) => {
     api.post(`/api/admin/courses/${id}/review`, { action: action })
-    .then(res => {
-      if ((res.status >= 200 && res.status < 300)) {
-        alert(`Course ${action}d successfully`);
-        loadPendingCourses();
-        loadApprovedCourses();
-      }
-    })
-    .catch(() => {});
+      .then(res => {
+        if ((res.status >= 200 && res.status < 300)) {
+          alert(`Course ${action}d successfully`);
+          loadPendingCourses();
+          loadApprovedCourses();
+        }
+      })
+      .catch(() => { });
   };
   const handleCertificateAction = (id, action) => {
     api.post(`/api/admin/certificates/${id}/review`, { action: action })
-    .then(res => {
-      if ((res.status >= 200 && res.status < 300)) {
-        alert(`Certificate ${action}d successfully`);
-        loadPendingCertificates();
+      .then(res => {
+        if ((res.status >= 200 && res.status < 300)) {
+          alert(`Certificate ${action}d successfully`);
+          loadPendingCertificates();
+        }
+      })
+      .catch(() => { });
+  };
+
+  const exportPaymentsExcel = async () => {
+    if (!payments || payments.length === 0) return;
+    
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Payment History');
+    
+    // Define column widths and keys first
+    worksheet.columns = [
+      { key: 'txnId', width: 28 },
+      { key: 'user', width: 25 },
+      { key: 'amount', width: 15 },
+      { key: 'date', width: 22 },
+      { key: 'status', width: 15 },
+    ];
+    
+    // 1. Add company title row (Row 1)
+    const titleRow = worksheet.addRow(['Shnoor LMS - Official Payment Records']);
+    worksheet.mergeCells('A1:E1');
+    titleRow.height = 40;
+    const titleCell = worksheet.getCell('A1');
+    titleCell.font = { name: 'Arial', family: 4, size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } }; // Blue-950
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    
+    // 2. Add headers row (Row 2)
+    const headerRow = worksheet.addRow({
+      txnId: 'Transaction ID',
+      user: 'User/Organization',
+      amount: 'Amount (₹)',
+      date: 'Date & Time',
+      status: 'Status'
+    });
+    headerRow.height = 25;
+    headerRow.font = { bold: true, color: { argb: 'FF172554' } };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    ['A', 'B', 'C', 'D', 'E'].forEach(col => {
+      worksheet.getCell(`${col}2`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAB308' } }; // Yellow-500
+    });
+    
+    // Add data
+    payments.forEach(payment => {
+      const row = worksheet.addRow({
+        txnId: payment.transaction_id,
+        user: payment.user_name || 'N/A',
+        amount: parseFloat(payment.amount),
+        date: new Date(payment.created_at).toLocaleString(),
+        status: payment.status
+      });
+      row.alignment = { vertical: 'middle', horizontal: 'center' };
+      row.getCell('amount').numFmt = '₹#,##0.00';
+      
+      // Status color coding
+      const statusCell = row.getCell('status');
+      statusCell.font = { bold: true };
+      if (payment.status === 'SUCCESS' || payment.status === 'COMPLETED') {
+        statusCell.font = { color: { argb: 'FF166534' }, bold: true }; // Green
+      } else {
+        statusCell.font = { color: { argb: 'FF991B1B' }, bold: true }; // Red
       }
-    })
-    .catch(() => {});
+    });
+    
+    // Generate buffer and trigger download
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, 'Shnoor_LMS_Payments_Export.xlsx');
   };
   const renderCoursesView = () => {
     return (
-      <div className="space-y-8">
-        <div>
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Pending Course Approvals</h3>
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Title</th>
-                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Instructor</th>
-                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Description</th>
-                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {pendingCourses.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="text-center py-16">
-                        <div className="flex flex-col items-center justify-center text-center">
-                          <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                            <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-                          </div>
-                          <p className="text-sm font-semibold text-slate-500">No pending courses found</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    pendingCourses.map((c, index) => (
-                      <tr key={index} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
-                            </div>
-                            <span className="text-sm font-bold text-slate-800">{c.title}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 shadow-sm border border-slate-200">
-                              {(c.instructor?.full_name || c.instructor?.email || "?").charAt(0).toUpperCase()}
-                            </div>
-                            <span className="text-sm font-medium">{c.instructor?.full_name || c.instructor?.email}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <p className="text-xs text-slate-500 truncate max-w-xs">{c.description}</p>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => handleCourseAction(c.id, "approve")} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                              Approve
-                            </button>
-                            <button onClick={() => handleCourseAction(c.id, "reject")} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                              Reject
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Approved Courses</h3>
+      <TabbedSection
+        activeTitle="Approved Courses"
+        pendingTitle="Pending Courses"
+        activeData={approvedCourses}
+        pendingData={pendingCourses}
+        typeName="Courses"
+        renderActiveTable={(data) => (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -216,54 +273,92 @@ function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {approvedCourses.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="text-center py-16">
-                        <div className="flex flex-col items-center justify-center text-center">
-                          <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                            <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                  {data.map((c, index) => (
+                    <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-950 flex items-center justify-center font-bold">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                           </div>
-                          <p className="text-sm font-semibold text-slate-500">No approved courses found</p>
+                          <span className="text-sm font-bold text-slate-800">{c.title}</span>
                         </div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 shadow-sm border border-slate-200">
+                            {(c.instructor?.full_name || c.instructor?.email || "?").charAt(0).toUpperCase()}
+                          </div>
+                          <span className="text-sm font-medium">{c.instructor?.full_name || c.instructor?.email}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-50 text-slate-700 font-bold border border-slate-100">{c.enrollments_count || 0}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                          Approved
+                        </span>
+                      </td>
                     </tr>
-                  ) : (
-                    approvedCourses.map((c, index) => (
-                      <tr key={index} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
-                            </div>
-                            <span className="text-sm font-bold text-slate-800">{c.title}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 shadow-sm border border-slate-200">
-                              {(c.instructor?.full_name || c.instructor?.email || "?").charAt(0).toUpperCase()}
-                            </div>
-                            <span className="text-sm font-medium">{c.instructor?.full_name || c.instructor?.email}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-50 text-slate-700 font-bold border border-slate-100">{c.enrollments_count || 0}</span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            Approved
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
-      </div>
+        )}
+        renderPendingTable={(data) => (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Title</th>
+                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Instructor</th>
+                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Description</th>
+                    <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.map((c, index) => (
+                    <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-950 flex items-center justify-center font-bold">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                          </div>
+                          <span className="text-sm font-bold text-slate-800">{c.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 shadow-sm border border-slate-200">
+                            {(c.instructor?.full_name || c.instructor?.email || "?").charAt(0).toUpperCase()}
+                          </div>
+                          <span className="text-sm font-medium">{c.instructor?.full_name || c.instructor?.email}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-xs text-slate-500 truncate max-w-xs">{c.description}</p>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => handleCourseAction(c.id, "approve")} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                            Approve
+                          </button>
+                          <button onClick={() => handleCourseAction(c.id, "reject")} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      />
     );
   };
   const renderCertificatesView = () => {
@@ -285,7 +380,7 @@ function AdminDashboard() {
                   <td colSpan="4" className="text-center py-16">
                     <div className="flex flex-col items-center justify-center text-center">
                       <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                        <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       </div>
                       <p className="text-sm font-semibold text-slate-500">No pending certificate requests</p>
                     </div>
@@ -304,13 +399,13 @@ function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2 text-slate-500">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                         <span className="text-sm font-medium">{c.student_email}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-col">
-                        <span className="text-xs font-bold text-blue-600">{c.course_title}</span>
+                        <span className="text-xs font-bold text-blue-950">{c.course_title}</span>
                         <span className="text-[10px] text-slate-400 font-medium">Verification Pending</span>
                       </div>
                     </td>
@@ -346,7 +441,8 @@ function AdminDashboard() {
     "Payments",
     "Reports",
     "Contact Queries",
-    "Settings",
+    "Announcements",
+    "Messages"
   ];
   const learners = approvedUsers.filter(
     (user) => user.role === "Learner" && user.learnerType !== "Employee"
@@ -375,7 +471,7 @@ function AdminDashboard() {
   );
   return (
     <div className="min-h-screen bg-slate-100 flex">
-      <aside className="w-60 bg-blue-950 text-white min-h-screen fixed left-0 top-0 flex flex-col justify-between">
+      <aside className="w-60 bg-blue-950 text-white h-screen fixed left-0 top-0 flex flex-col justify-between z-20">
         <div>
           <div className="px-4 py-4">
             <div className="flex items-center gap-3">
@@ -390,33 +486,38 @@ function AdminDashboard() {
               </div>
             </div>
           </div>
-          <nav className="px-3 py-3 space-y-1">
+          <nav className="px-3 py-3 space-y-1 overflow-y-auto max-h-[calc(100vh-140px)] custom-scrollbar">
             {menuItems.map((item) => (
               <button
                 key={item}
                 onClick={() => setActivePage(item)}
-                className={`w-full text-left px-4 py-2.5 rounded-xl text-[12px] font-semibold transition ${activePage === item
-                  ? "bg-white text-blue-950"
+                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-[12px] font-semibold transition ${activePage === item
+                  ? "bg-yellow-500 text-blue-950 font-bold shadow-[0_4px_15px_-3px_rgba(234,179,8,0.5)]"
                   : "text-blue-50 hover:bg-blue-900"
                   }`}
               >
-                {item}
+                <span>{item}</span>
+                {item === "Messages" && unreadCount > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
         </div>
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-4 border-t border-slate-800 shrink-0">
           <button
             onClick={() => { sessionStorage.clear(); navigate('/login'); }}
-            className="w-full bg-blue-900 hover:bg-red-600 text-blue-50 hover:text-white py-2.5 px-4 rounded-xl text-[12px] font-bold transition flex items-center justify-center gap-2"
+            className="w-full bg-blue-900 hover:bg-yellow-500 text-blue-50 hover:text-blue-950 py-2.5 px-4 rounded-xl text-[12px] font-bold transition flex items-center justify-center gap-2"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
             Logout
           </button>
         </div>
       </aside>
-      <main className="ml-60 flex-1">
-        <header className="bg-white px-8 py-3 border-b border-slate-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+      <main className="ml-60 flex-1 w-[calc(100%-15rem)] min-w-0">
+        <header className="bg-white px-8 py-3 border-b border-slate-200 flex justify-between items-center sticky top-0 z-40 shadow-sm">
           <div className="flex flex-col">
             <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
               {activePage}
@@ -425,10 +526,15 @@ function AdminDashboard() {
               Manage your {activePage.toLowerCase()} and view statistics.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-              <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
-              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-800 border border-blue-200 flex items-center justify-center font-bold text-sm">
-                {(sessionStorage.getItem("username") || "Admin User").charAt(0).toUpperCase()}
+          <div className="flex items-center gap-6">
+            <GlobalSearch />
+            <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
+              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-800 border border-blue-200 flex items-center justify-center font-bold text-sm overflow-hidden">
+                {profilePic ? (
+                  <img src={profilePic} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  (sessionStorage.getItem("username") || "Admin")[0].toUpperCase()
+                )}
               </div>
               <div className="hidden md:block">
                 <p className="text-sm font-semibold text-slate-800 leading-tight">{sessionStorage.getItem("username") || "Admin User"}</p>
@@ -444,12 +550,12 @@ function AdminDashboard() {
             const totalInstructorRequests = instructorRequests.length + allApprovedAccounts.filter(u => u.role === "Instructor").length;
             const totalOrgRequests = organizationRequests.length + allApprovedAccounts.filter(u => u.role === "Organization Admin").length;
             const totalRequests = totalLearnerRequests + totalEmployeeRequests + totalInstructorRequests + totalOrgRequests;
-            
+
             const learnerPct = totalRequests > 0 ? Math.round((totalLearnerRequests / Math.max(totalRequests, 1)) * 100) : 0;
             const employeePct = totalRequests > 0 ? Math.round((totalEmployeeRequests / Math.max(totalRequests, 1)) * 100) : 0;
             const instructorPct = totalRequests > 0 ? Math.round((totalInstructorRequests / Math.max(totalRequests, 1)) * 100) : 0;
             const orgPct = totalRequests > 0 ? Math.round((totalOrgRequests / Math.max(totalRequests, 1)) * 100) : 0;
-            
+
             const segments = [
               { label: "Learner Requests", count: totalLearnerRequests, pct: learnerPct, color: "#3b82f6" },
               { label: "Employee Requests", count: totalEmployeeRequests, pct: employeePct, color: "#22c55e" },
@@ -459,16 +565,16 @@ function AdminDashboard() {
             const radius = 70, cx = 90, cy = 90, strokeWidth = 18;
             const circumference = 2 * Math.PI * radius;
             let cumulativeOffset = 0;
-            
+
             return (
               <div className="animate-fade-in-up space-y-6">
                 {/* 4 Stat Cards */}
                 <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
                   {[
-                    { title: "TOTAL LEARNERS", value: learners.length, bg: "bg-blue-50/50", iconBg: "bg-blue-100", iconColor: "text-blue-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg> },
-                    { title: "TOTAL EMPLOYEES", value: employeeRequests.length + approvedEmployees.length, bg: "bg-emerald-50/50", iconBg: "bg-emerald-100", iconColor: "text-emerald-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg> },
-                    { title: "TOTAL INSTRUCTORS", value: instructorRequests.length + allApprovedAccounts.filter(u => u.role === "Instructor").length, bg: "bg-violet-50/50", iconBg: "bg-violet-100", iconColor: "text-violet-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H14"/></svg> },
-                    { title: "TOTAL ORGANIZATIONS", value: organizationRequests.length + allApprovedAccounts.filter(u => u.role === "Organization Admin").length, bg: "bg-rose-50/50", iconBg: "bg-rose-100", iconColor: "text-rose-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg> },
+                    { title: "TOTAL LEARNERS", value: learners.length, bg: "bg-blue-50/50", iconBg: "bg-blue-100", iconColor: "text-blue-950", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
+                    { title: "TOTAL EMPLOYEES", value: employeeRequests.length + approvedEmployees.length, bg: "bg-emerald-50/50", iconBg: "bg-emerald-100", iconColor: "text-emerald-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> },
+                    { title: "TOTAL INSTRUCTORS", value: instructorRequests.length + allApprovedAccounts.filter(u => u.role === "Instructor").length, bg: "bg-violet-50/50", iconBg: "bg-violet-100", iconColor: "text-violet-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H14" /></svg> },
+                    { title: "TOTAL ORGANIZATIONS", value: organizationRequests.length + allApprovedAccounts.filter(u => u.role === "Organization Admin").length, bg: "bg-rose-50/50", iconBg: "bg-rose-100", iconColor: "text-rose-600", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> },
                   ].map((card, idx) => (
                     <div key={idx} className={`${card.bg} rounded-2xl p-5 border border-slate-100 flex items-start justify-between shadow-sm`}>
                       <div>
@@ -487,7 +593,7 @@ function AdminDashboard() {
                   <div className="lg:col-span-3 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col">
                     <div className="flex justify-between items-center mb-6">
                       <h3 className="text-lg font-extrabold text-slate-800">Recent Approvals</h3>
-                      <button onClick={() => setActivePage("Approved Accounts")} className="text-sm font-bold text-blue-600 hover:text-blue-700 transition">View All</button>
+                      <button onClick={() => setActivePage("Approved Accounts")} className="text-sm font-bold text-blue-950 hover:text-blue-700 transition">View All</button>
                     </div>
                     <div className="space-y-4 flex-1">
                       {allApprovedAccounts.length === 0 ? (
@@ -496,7 +602,7 @@ function AdminDashboard() {
                         </div>
                       ) : (
                         allApprovedAccounts.slice(0, 4).map((user, i) => {
-                          const bgColors = ["bg-blue-600", "bg-violet-600", "bg-emerald-600", "bg-rose-600"];
+                          const bgColors = ["bg-blue-950", "bg-violet-600", "bg-emerald-600", "bg-rose-600"];
                           return (
                             <div key={i} className="flex items-center gap-4 pb-4 border-b border-slate-50 last:border-0 last:pb-0">
                               <div className={`w-10 h-10 rounded-full ${bgColors[i % 4]} text-white flex items-center justify-center font-bold text-sm shadow-sm`}>
@@ -578,7 +684,7 @@ function AdminDashboard() {
                     </div>
                     <div className="mt-6 p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex gap-3 items-start">
                       <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                       </div>
                       <div>
                         <h4 className="text-sm font-bold text-slate-800">All clear! Keep up the great work.</h4>
@@ -593,7 +699,7 @@ function AdminDashboard() {
                   <h3 className="text-sm font-extrabold text-slate-800 mb-4">Quick Actions</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     {[
-                      { title: "Add Learner", sub: "Create new learner", icon: "M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z", color: "text-blue-600", bg: "bg-blue-50", click: "Learner Management" },
+                      { title: "Add Learner", sub: "Create new learner", icon: "M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z", color: "text-blue-950", bg: "bg-blue-50", click: "Learner Management" },
                       { title: "Add Employee", sub: "Create new employee", icon: "M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z", color: "text-emerald-600", bg: "bg-emerald-50", click: "Employee Approvals" },
                       { title: "Add Instructor", sub: "Create new instructor", icon: "M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H14", color: "text-violet-600", bg: "bg-violet-50", click: "Instructor Approvals" },
                       { title: "Add Organization", sub: "Create new organization", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4", color: "text-rose-600", bg: "bg-rose-50", click: "Organization Approvals" },
@@ -602,7 +708,7 @@ function AdminDashboard() {
                     ].map((btn, idx) => (
                       <button key={idx} onClick={() => setActivePage(btn.click)} className="bg-white rounded-xl p-4 border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all text-left flex flex-col group">
                         <div className={`w-8 h-8 rounded-lg ${btn.bg} ${btn.color} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={btn.icon}/></svg>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={btn.icon} /></svg>
                         </div>
                         <h4 className="text-xs font-bold text-slate-800">{btn.title}</h4>
                         <p className="text-[10px] text-slate-500 mt-0.5">{btn.sub}</p>
@@ -614,49 +720,103 @@ function AdminDashboard() {
             );
           })()}
           {activePage === "Learner Management" && (
-            <div className="space-y-8">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800 mb-4">Pending Learner Approvals</h3>
-                  <ApprovalTable
-                    users={learnerRequests.map(u => ({...u, _status: 'pending'}))}
-                    approveUser={approveUser}
-                    rejectUser={rejectUser}
-                    type="learner"
-                  />
-                </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-800 mb-4">Approved Learners</h3>
+            <TabbedSection
+              activeTitle="Active Learners"
+              pendingTitle="Pending Approvals"
+              activeData={learners}
+              pendingData={learnerRequests}
+              typeName="Learners"
+              renderActiveTable={(data) => (
                 <UserTable
-                  users={learners}
+                  users={data}
                   type="learner"
                   pendingCertificates={pendingCertificates}
                   handleCertificateAction={handleCertificateAction}
                 />
-              </div>
-            </div>
+              )}
+              renderPendingTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'pending' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="learner"
+                />
+              )}
+            />
           )}
           {activePage === "Employee Approvals" && (
-            <ApprovalTable
-              users={[...employeeRequests.map(u => ({...u, _status: 'pending'})), ...approvedEmployees.map(u => ({...u, _status: 'approved'}))]}
-              approveUser={approveUser}
-              rejectUser={rejectUser}
-              type="employee"
+            <TabbedSection
+              activeTitle="Active Employees"
+              pendingTitle="Pending Approvals"
+              activeData={approvedEmployees}
+              pendingData={employeeRequests}
+              typeName="Employees"
+              renderActiveTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'approved' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="employee"
+                />
+              )}
+              renderPendingTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'pending' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="employee"
+                />
+              )}
             />
           )}
           {activePage === "Instructor Approvals" && (
-            <ApprovalTable
-              users={[...instructorRequests.map(u => ({...u, _status: 'pending'})), ...allApprovedAccounts.filter(u => u.role === "Instructor").map(u => ({...u, _status: 'approved'}))]}
-              approveUser={approveUser}
-              rejectUser={rejectUser}
-              type="instructor"
+            <TabbedSection
+              activeTitle="Active Instructors"
+              pendingTitle="Pending Approvals"
+              activeData={allApprovedAccounts.filter(u => u.role === "Instructor")}
+              pendingData={instructorRequests}
+              typeName="Instructors"
+              renderActiveTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'approved' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="instructor"
+                />
+              )}
+              renderPendingTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'pending' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="instructor"
+                />
+              )}
             />
           )}
           {activePage === "Organization Approvals" && (
-            <ApprovalTable
-              users={[...organizationRequests.map(u => ({...u, _status: 'pending'})), ...allApprovedAccounts.filter(u => u.role === "Organization Admin").map(u => ({...u, _status: 'approved'}))]}
-              approveUser={approveUser}
-              rejectUser={rejectUser}
-              type="organization"
+            <TabbedSection
+              activeTitle="Active Organizations"
+              pendingTitle="Pending Approvals"
+              activeData={allApprovedAccounts.filter(u => u.role === "Organization Admin")}
+              pendingData={organizationRequests}
+              typeName="Organizations"
+              renderActiveTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'approved' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="organization"
+                />
+              )}
+              renderPendingTable={(data) => (
+                <ApprovalTable
+                  users={data.map(u => ({ ...u, _status: 'pending' }))}
+                  approveUser={approveUser}
+                  rejectUser={rejectUser}
+                  type="organization"
+                />
+              )}
             />
           )}
           {activePage === "Approved Accounts" && (
@@ -669,22 +829,79 @@ function AdminDashboard() {
           )}
           {activePage === "Manage Courses" && renderCoursesView()}
           {activePage === "Certificate Approvals" && renderCertificatesView()}
-          {![
-            "Overview",
-            "Learner Management",
-            "Employee Approvals",
-            "Instructor Approvals",
-            "Organization Approvals",
-            "Approved Accounts",
-            "Manage Courses",
-            "Certificate Approvals"
-          ].includes(activePage) && (
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
-                <p className="text-sm text-slate-500">
-                  This module will be developed next.
-                </p>
+          {activePage === "Subscription Plans" && (
+            <SubscriptionPlansView />
+          )}
+          {activePage === "Payments" && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-fade-in-up">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
+                <h3 className="text-lg font-extrabold text-slate-800 tracking-tight">Payment History</h3>
+                <button 
+                  onClick={exportPaymentsExcel}
+                  disabled={payments.length === 0}
+                  className="bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] px-4 py-2 rounded-xl text-xs transition">
+                  Export Excel
+                </button>
               </div>
-            )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Transaction ID</th>
+                      <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">User</th>
+                      <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                      <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {payments.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center py-20 bg-white">
+                          <div className="flex flex-col items-center justify-center text-center">
+                            <div className="w-14 h-14 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                              </svg>
+                            </div>
+                            <h4 className="text-base font-bold text-slate-800 mb-1">No payment transactions recorded</h4>
+                            <p className="text-xs font-medium text-slate-500 max-w-sm">No data is currently available in this section. Records will appear here automatically.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      payments.map((p, i) => (
+                        <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-xs font-bold text-slate-700">{p.transaction_id}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">{p.user_name || "Unknown"}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-black text-blue-950">₹{parseFloat(p.amount).toLocaleString()}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-500">{new Date(p.created_at).toLocaleDateString()}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              {p.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {activePage === "Reports" && (
+            <SuperAdminReports />
+          )}
+          {activePage === "Contact Queries" && (
+            <PlaceholderTable title="Support Queries" emptyText="No support tickets pending" columns={["Ticket ID", "User Contact", "Subject", "Status", "Action"]} />
+          )}
+          {activePage === "Announcements" && (
+            <InstituteAnnouncements />
+          )}
+          {activePage === "Messages" && (
+            <ChatLayout />
+          )}
         </section>
       </main>
     </div>
@@ -727,19 +944,19 @@ function UserTable({ users, type, pendingCertificates, handleCertificateAction }
         <table className="w-full text-left">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">User</th>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Contact</th>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Role & Details</th>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Status</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider w-[30%]">User Details</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider w-[25%]">Contact</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider w-[30%]">Role & Details</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right w-[15%]">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {users.length === 0 ? (
               <tr>
-                <td colSpan="4" className="text-center py-16">
+                <td colSpan={4} className="text-center py-16">
                   <div className="flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                      <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                     </div>
                     <p className="text-sm font-semibold text-slate-500">No records found</p>
                   </div>
@@ -750,16 +967,19 @@ function UserTable({ users, type, pendingCertificates, handleCertificateAction }
                 <tr key={index} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 text-slate-600 flex items-center justify-center font-bold text-sm shadow-sm">
+                      <div className="w-9 h-9 rounded-full bg-blue-50 border border-blue-100 text-blue-950 flex items-center justify-center font-bold text-sm shadow-sm">
                         {user.name ? user.name.charAt(0).toUpperCase() : "-"}
                       </div>
-                      <span className="text-sm font-bold text-slate-800">{user.name}</span>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-800">{user.name || "-"}</span>
+                        <span className="text-[10px] text-slate-400 font-bold">User ID: {user.id}</span>
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-2 text-slate-500">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                      <span className="text-sm font-medium">{user.email}</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                      <span className="text-sm font-medium">{user.email || "-"}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -804,9 +1024,9 @@ function ApprovalTable({ users, approveUser, rejectUser, type }) {
         <table className="w-full text-left">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">User</th>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Contact</th>
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Role</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[25%]">User Details</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[20%]">Contact</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[15%]">Role</th>
               {type === "employee" && (
                 <>
                   <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Emp ID</th>
@@ -815,24 +1035,24 @@ function ApprovalTable({ users, approveUser, rejectUser, type }) {
               )}
               {type === "organization" && (
                 <>
-                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Org Code</th>
-                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Location</th>
+                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[15%]">Org Code</th>
+                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[15%]">Location</th>
                 </>
               )}
               {type === "instructor" && (
                 <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Joined Date</th>
               )}
-              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Status</th>
+              <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[10%]">Status</th>
               <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {users.length === 0 ? (
               <tr>
-                <td colSpan="8" className="text-center py-16">
+                <td colSpan={10} className="text-center py-16">
                   <div className="flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                      <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                     </div>
                     <p className="text-sm font-semibold text-slate-500">No requests found</p>
                   </div>
@@ -843,16 +1063,19 @@ function ApprovalTable({ users, approveUser, rejectUser, type }) {
                 <tr key={index} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 text-slate-600 flex items-center justify-center font-bold text-sm shadow-sm">
+                      <div className="w-9 h-9 rounded-full bg-blue-50 border border-blue-100 text-blue-950 flex items-center justify-center font-bold text-sm shadow-sm">
                         {user.name ? user.name.charAt(0).toUpperCase() : "-"}
                       </div>
-                      <span className="text-sm font-bold text-slate-800">{user.name}</span>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-800">{user.name || "-"}</span>
+                        <span className="text-[10px] text-slate-400 font-bold">User ID: {user.id}</span>
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-2 text-slate-500">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                      <span className="text-sm font-medium">{user.email}</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                      <span className="text-sm font-medium">{user.email || "-"}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -937,4 +1160,121 @@ function getUserDetails(user, type) {
   }
   return `${user.learnerType || "-"}`;
 }
+
+function PlaceholderTable({ title, columns, emptyText, actionButton }) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-fade-in-up">
+      <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
+        <h3 className="text-lg font-extrabold text-slate-800 tracking-tight">{title}</h3>
+        {actionButton && (
+          <button className="bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm">
+            {actionButton}
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              {columns.map((col, idx) => (
+                <th key={idx} className={`px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider ${idx === columns.length - 1 ? 'text-right' : ''}`}>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            <tr>
+              <td colSpan={columns.length} className="text-center py-20 bg-white">
+                <div className="flex flex-col items-center justify-center text-center">
+                  <div className="w-14 h-14 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                    <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                  </div>
+                  <h4 className="text-base font-bold text-slate-800 mb-1">{emptyText}</h4>
+                  <p className="text-xs font-medium text-slate-500 max-w-sm">No data is currently available in this section. Records will appear here automatically.</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, description, icon }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center p-16 min-h-[300px]">
+      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-5 text-slate-400 border border-slate-100">
+        {icon}
+      </div>
+      <h3 className="text-xl font-bold text-slate-800 mb-2">{title}</h3>
+      <p className="text-slate-500 text-sm max-w-sm mx-auto">{description}</p>
+    </div>
+  );
+}
+
+function TabbedSection({ activeTitle, pendingTitle, activeData, pendingData, renderActiveTable, renderPendingTable, typeName }) {
+  const [activeTab, setActiveTab] = useState('active');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const currentData = activeTab === 'active' ? activeData : pendingData;
+  const filteredData = currentData.filter(item =>
+    JSON.stringify(item).toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6 animate-fade-in-up">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm gap-4">
+        <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200 w-full sm:w-auto">
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex-1 sm:flex-none ${activeTab === 'active' ? 'bg-white text-blue-950 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            {activeTitle}
+          </button>
+          <button
+            onClick={() => setActiveTab('pending')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex-1 sm:flex-none flex items-center justify-center gap-2 ${activeTab === 'pending' ? 'bg-white text-blue-950 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            {pendingTitle}
+            {pendingData.length > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{pendingData.length}</span>
+            )}
+          </button>
+        </div>
+
+        <div className="relative w-full sm:w-72">
+          <svg className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input
+            type="text"
+            placeholder={`Search ${typeName}...`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+        </div>
+      </div>
+
+      {filteredData.length === 0 ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <EmptyState
+            title={`No ${activeTab === 'active' ? 'Active' : 'Pending'} ${typeName} Found`}
+            description={activeTab === 'pending' ? `There are no pending approval requests for ${typeName.toLowerCase()} at the moment.` : `There are currently no active ${typeName.toLowerCase()} matching your criteria.`}
+            icon={
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            }
+          />
+        </div>
+      ) : (
+        activeTab === 'active' ? renderActiveTable(filteredData) : renderPendingTable(filteredData)
+      )}
+    </div>
+  );
+}
+
 export default AdminDashboard;

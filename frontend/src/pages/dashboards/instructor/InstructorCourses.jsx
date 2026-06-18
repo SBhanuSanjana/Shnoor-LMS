@@ -1,10 +1,12 @@
 import React,{useState,useEffect}from"react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import api from '../../../api';
-import{Plus,Edit2,Trash2,CheckCircle,Clock,Search}from"lucide-react";
-import{useNavigate}from"react-router-dom";
+import {Plus,Edit2,Trash2,CheckCircle,Clock,Search} from "lucide-react";
+import {useNavigate, useLocation} from "react-router-dom";
 function InstructorCourses(){
   const navigate=useNavigate();
-  const[searchTerm,setSearchTerm]=useState("");
+  const location=useLocation();
+  const[searchTerm,setSearchTerm]=useState(location.state?.searchTerm || "");
   const[courses,setCourses]=useState([]);
   const[loading,setLoading]=useState(true);
 
@@ -22,6 +24,12 @@ function InstructorCourses(){
   useEffect(()=>{
     loadCourses();
   },[]);
+
+  useEffect(() => {
+    if (courses.length > 0 && location.state?.targetCourseId) {
+      navigate(`/instructor-dashboard/courses/${location.state.targetCourseId}/build`, { state: location.state });
+    }
+  }, [courses, location.state, navigate]);
   const handleDelete=async(id)=>{
     if(!window.confirm("Are you sure you want to delete this course?"))return;
     try{
@@ -47,7 +55,10 @@ function InstructorCourses(){
         return<span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">{status}</span>;
     }
   };
-  const filteredCourses=courses.filter(c=>c.title.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredCourses=courses.filter(c=> {
+    if (location.state?.targetCourseId && c.id === location.state.targetCourseId) return true;
+    return c.title.toLowerCase().includes(searchTerm.toLowerCase());
+  });
   return(
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -62,10 +73,35 @@ function InstructorCourses(){
       </div>
       {loading?(
         <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
         </div>
       ):(
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="space-y-6">
+          {courses.length > 0 && (
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Course Enrollments Analytics</h3>
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={courses}
+                    margin={{ top: 20, right: 30, left: 0, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="title" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} allowDecimals={false} />
+                    <Tooltip 
+                      cursor={{fill: '#f1f5f9'}}
+                      contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'}}
+                    />
+                    <Legend iconType="circle" />
+                    <Bar dataKey="enrollments_count" name="Learners Enrolled" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={60} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-bold">
@@ -80,7 +116,7 @@ function InstructorCourses(){
                 <tr key={course.id} className="hover:bg-slate-50 transition-colors group">
                   <td className="p-4 pl-6">
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{course.title}</h4>
+                      <h4 className="text-sm font-bold text-slate-900 group-hover:text-blue-950 transition-colors">{course.title}</h4>
                       <p className="text-xs text-slate-500 mt-1">Created on {new Date(course.created_at).toLocaleDateString()}</p>
                     </div>
                   </td>
@@ -94,7 +130,7 @@ function InstructorCourses(){
                     {(course.enrollments_count||0).toLocaleString()}
                   </td>
                   <td className="p-4 pr-6 flex justify-end gap-2">
-                    <button onClick={()=>navigate(`/instructor-dashboard/courses/${course.id}/build`)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit/Build Course">
+                    <button onClick={()=>navigate(`/instructor-dashboard/courses/${course.id}/build`)} className="p-2 text-slate-400 hover:text-blue-950 hover:bg-blue-50 rounded-lg transition-colors" title="Edit/Build Course">
                       <Edit2 size={18}/>
                     </button>
                     <button onClick={()=>handleDelete(course.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
@@ -105,11 +141,12 @@ function InstructorCourses(){
               ))}
               {filteredCourses.length===0&&(
                 <tr>
-                  <td colSpan="4" className="p-8 text-center text-slate-500">No courses found.</td>
+                  <td colSpan="4" className="p-8 text-center text-slate-500">No courses found matching your search.</td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
         </div>
       )}
     </div>

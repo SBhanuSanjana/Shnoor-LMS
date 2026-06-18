@@ -1,12 +1,14 @@
 import React,{useState,useEffect} from 'react';
+import { useLocation } from 'react-router-dom';
 import {Users,Search,Award,BookOpen,TrendingUp,Mail} from 'lucide-react';
 import api from '../../../api';
 
 function StudentProgress(){
+  const location = useLocation();
   const[enrollments,setEnrollments]=useState([]);
   const[loading,setLoading]=useState(true);
   const[activeCourse,setActiveCourse]=useState('all');
-  const[search,setSearch]=useState('');
+  const[search,setSearch]=useState(location.state?.searchTerm || '');
 
 
   const fetchEnrollments=async()=>{
@@ -39,19 +41,19 @@ function StudentProgress(){
     return totalQuestions>0?Math.round((totalScore/totalQuestions)*100):null;
   };
 
-  const totalStudents=new Set(enrollments.map(e=>e.student?.id)).size;
-  const completions=enrollments.filter(e=>getProgress(e)===100).length;
-  const avgProgress=enrollments.length>0 
-    ?Math.round(enrollments.reduce((sum,e)=>sum+getProgress(e),0)/enrollments.length) 
-    :0;
-  const activeCoursesCount=new Set(enrollments.map(e=>e.course?.id)).size;
-
   const courseTitles=['all',...new Set(enrollments.map(e=>e.course?.title))];
 
   const filteredEnrollments=enrollments.filter(e=>{
     if(activeCourse==='all')return true;
     return e.course?.title===activeCourse;
   });
+
+  const totalStudents=new Set(filteredEnrollments.map(e=>e.student?.id)).size;
+  const completions=filteredEnrollments.filter(e=>getProgress(e)===100).length;
+  const avgProgress=filteredEnrollments.length>0 
+    ?Math.round(filteredEnrollments.reduce((sum,e)=>sum+getProgress(e),0)/filteredEnrollments.length) 
+    :0;
+  const activeCoursesCount=new Set(filteredEnrollments.map(e=>e.course?.id)).size;
 
   const searchedEnrollments=filteredEnrollments.filter(e=>{
     const sName=(e.student?.full_name||'').toLowerCase();
@@ -71,7 +73,7 @@ function StudentProgress(){
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-950 flex items-center justify-center">
             <Users size={20} />
           </div>
           <div>
@@ -110,16 +112,18 @@ function StudentProgress(){
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50">
-          <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 hide-scrollbar">
-            {courseTitles.map(course=>(
-              <button 
-                key={course}
-                onClick={()=>setActiveCourse(course)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeCourse===course?'bg-slate-800 text-white shadow-sm':'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-              >
-                {course==='all'?'All Courses':course}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <select 
+              value={activeCourse}
+              onChange={(e)=>setActiveCourse(e.target.value)}
+              className="w-full md:w-64 p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none bg-white text-sm font-medium text-slate-700 shadow-sm"
+            >
+              {courseTitles.map(course=>(
+                <option key={course} value={course}>
+                  {course==='all'?'All Courses':course}
+                </option>
+              ))}
+            </select>
           </div>
           
           <div className="flex items-center gap-3 w-full md:w-auto">
@@ -138,7 +142,7 @@ function StudentProgress(){
 
         {loading?(
           <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
           </div>
         ):(
           <div className="overflow-x-auto">
@@ -203,10 +207,10 @@ function StudentProgress(){
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-2 transition-opacity">
                           <button 
                             onClick={()=>alert(`Emailing student at ${email}`)}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
+                            className="p-1.5 text-slate-400 hover:text-blue-950 hover:bg-blue-50 rounded-lg transition-colors" 
                             title="Message Student"
                           >
                             <Mail size={16} />

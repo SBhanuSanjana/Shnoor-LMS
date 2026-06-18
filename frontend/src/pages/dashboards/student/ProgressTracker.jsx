@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, CheckCircle, ClipboardList, Target } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import api from '../../../api';
 function ProgressTracker() {
   const [enrollments, setEnrollments] = useState([]);
@@ -69,13 +70,13 @@ function ProgressTracker() {
 
       {loading ? (
         <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+              <div className="w-12 h-12 bg-blue-50 text-blue-950 rounded-xl flex items-center justify-center">
                 <BookOpen size={24} />
               </div>
 
@@ -135,53 +136,60 @@ function ProgressTracker() {
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <h3 className="text-lg font-bold text-slate-800">
-              Course-wise Progression Details
-            </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+              <h3 className="text-lg font-bold text-slate-800">
+                Course Progress
+              </h3>
+              <div className="h-[300px]">
+                {enrollments.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={enrollments.map(e => {
+                      let totalL = 0;
+                      e.course.modules?.forEach(m => { if(m.title !== "Final Quiz") totalL += m.lessons?.length || 0; });
+                      const compL = e.lesson_progress?.filter(p => p.is_completed).length || 0;
+                      return { name: e.course.title.substring(0, 15) + "...", progress: totalL > 0 ? Math.round((compL/totalL)*100) : 0 };
+                    })}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tick={{fontSize: 12}} />
+                      <YAxis tick={{fontSize: 12}} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="progress" stroke="#4f46e5" strokeWidth={3} dot={{r: 6}} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-slate-400">No data</div>
+                )}
+              </div>
+            </div>
 
-            <div className="space-y-6">
-              {enrollments.map((e) => {
-                let totalLessons = 0;
-
-                e.course.modules?.forEach((m) => {
-                  if (m.title !== "Final Quiz") {
-                    totalLessons += m.lessons?.length || 0;
-                  }
-                });
-
-                const doneLessons =
-                  e.lesson_progress?.filter((p) => p.is_completed).length || 0;
-
-                const pct =
-                  totalLessons > 0
-                    ? Math.round((doneLessons / totalLessons) * 100)
-                    : 0;
-
-                return (
-                  <div key={e.id} className="space-y-2">
-                    <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
-                      <span>{e.course.title}</span>
-                      <span>
-                        {pct}% ({doneLessons}/{totalLessons} lessons)
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                      <div
-                        className="bg-blue-600 h-2.5 rounded-full transition-all"
-                        style={{ width: `${pct}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {enrollments.length === 0 && (
-                <div className="text-center py-6 text-slate-400 font-medium">
-                  No progress logs recorded.
-                </div>
-              )}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+              <h3 className="text-lg font-bold text-slate-800">
+                Overall Engagement
+              </h3>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: "Lessons Done", value: stats.completedL, color: "#10b981" },
+                        { name: "Lessons Remaining", value: Math.max(0, stats.totalL - stats.completedL), color: "#cbd5e1" }
+                      ]}
+                      cx="50%" cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {[{color: "#10b981"}, {color: "#cbd5e1"}].map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
         </>

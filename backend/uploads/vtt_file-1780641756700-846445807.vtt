@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Welcome to Introduction to SQL.
+
+00:00:05.000 --> 00:00:10.000
+SQL stands for Structured Query Language.
+
+00:00:10.000 --> 00:00:15.000
+SQL is used to manage and interact with relational databases.
+
+00:00:15.000 --> 00:00:20.000
+Databases store information in tables, rows, and columns.
+
+00:00:20.000 --> 00:00:24.900
+SQL helps retrieve, insert, update, and delete data efficiently.

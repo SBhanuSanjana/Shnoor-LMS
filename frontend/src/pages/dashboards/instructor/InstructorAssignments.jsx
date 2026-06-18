@@ -1,8 +1,10 @@
 import React,{useState,useEffect} from 'react';
+import { useLocation } from 'react-router-dom';
 import {FileText,Plus,Search,CheckCircle,Clock,X} from 'lucide-react';
 import api from '../../../api';
 
 function InstructorAssignments(){
+  const location = useLocation();
   const[submissions,setSubmissions]=useState([]);
   const[courses,setCourses]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -11,7 +13,7 @@ function InstructorAssignments(){
   const[selectedSubmission,setSelectedSubmission]=useState(null);
   const[showGradeModal,setShowGradeModal]=useState(false);
   const[gradeInput,setGradeInput]=useState('');
-  const[search,setSearch]=useState('');
+  const[search,setSearch]=useState(location.state?.searchTerm || '');
   const[newTitle,setNewTitle]=useState('');
   const[newCourseId,setNewCourseId]=useState('');
   const[newDesc,setNewDesc]=useState('');
@@ -55,7 +57,7 @@ function InstructorAssignments(){
     e.preventDefault();
     if(!gradeInput.trim()||!selectedSubmission)return;
     try{
-      const res=await api.post(`/api/courses/instructor/submissions${selectedSubmission.id}/grade/`, {grade:gradeInput});
+      const res=await api.post(`/api/courses/assessments/submissions/${selectedSubmission.id}/grade`, {grade:gradeInput});
       if((res.status >= 200 && res.status < 300)){
         alert("Submission graded successfully");
         setShowGradeModal(false);
@@ -93,6 +95,7 @@ function InstructorAssignments(){
   const graded=submissions.filter(s=>s.is_graded).length;
 
   const filteredSubmissions=submissions.filter(s=>{
+    if(search) return true;
     if(activeTab==='active')return !s.is_graded;
     if(activeTab==='completed')return s.is_graded;
     return true;
@@ -113,7 +116,7 @@ function InstructorAssignments(){
         </div>
         <button 
           onClick={()=>setShowCreateModal(true)}
-          className="bg-blue-950 hover:bg-blue-900 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+          className="bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
         >
           <Plus size={18} />
           Create Assignment
@@ -180,7 +183,7 @@ function InstructorAssignments(){
 
         {loading?(
           <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
           </div>
         ):(
           <div className="divide-y divide-slate-100">
@@ -207,7 +210,7 @@ function InstructorAssignments(){
                   <div className="flex items-center gap-2">
                     <button 
                       onClick={()=>handleOpenGradeModal(submission)}
-                      className="bg-blue-50 text-blue-600 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5"
+                      className="bg-blue-50 text-blue-950 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5"
                     >
                       <CheckCircle size={16} />
                       {!submission.is_graded?'Grade Submission':'View / Edit Grade'}
@@ -243,11 +246,24 @@ function InstructorAssignments(){
                 <p className="text-sm font-bold text-slate-800">{selectedSubmission.student_name}</p>
                 <p className="text-xs text-slate-500 mt-0.5">Email: {selectedSubmission.student_email}</p>
               </div>
-              <div>
-                <p className="text-xs text-slate-400 font-semibold uppercase mb-1.5">Submitted Answers / Text</p>
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 max-h-60 overflow-y-auto font-mono text-sm whitespace-pre-wrap text-slate-700">
-                  {selectedSubmission.answers_text}
-                </div>
+              <div className="space-y-4">
+                {selectedSubmission.answers_text && (
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold uppercase mb-1.5">Submitted Answers / Text</p>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 max-h-60 overflow-y-auto font-mono text-sm whitespace-pre-wrap text-slate-700">
+                      {selectedSubmission.answers_text}
+                    </div>
+                  </div>
+                )}
+                {selectedSubmission.submission_file && (
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold uppercase mb-1.5">Attached File</p>
+                    <a href={`http://localhost:5000/${selectedSubmission.submission_file}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-slate-50 text-blue-600 hover:text-blue-700 hover:bg-slate-100 border border-slate-200 px-4 py-2 rounded-lg text-sm font-semibold transition">
+                      <FileText size={16} />
+                      View / Download Attached File
+                    </a>
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">Grade / Score</label>
@@ -262,7 +278,7 @@ function InstructorAssignments(){
               </div>
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={()=>setShowGradeModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Cancel</button>
-                <button type="submit" className="px-5 py-2.5 bg-blue-950 hover:bg-blue-900 text-white rounded-xl font-bold transition-colors shadow-md">Submit Grade</button>
+                <button type="submit" className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] rounded-xl font-bold transition-colors shadow-md">Submit Grade</button>
               </div>
             </form>
           </div>
@@ -319,7 +335,7 @@ function InstructorAssignments(){
               </div>
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={()=>setShowCreateModal(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Cancel</button>
-                <button type="submit" className="px-5 py-2.5 bg-blue-950 hover:bg-blue-900 text-white rounded-xl font-bold transition-colors shadow-md">Publish Assignment</button>
+                <button type="submit" className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] rounded-xl font-bold transition-colors shadow-md">Publish Assignment</button>
               </div>
             </form>
           </div>

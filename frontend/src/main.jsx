@@ -9,3 +9,4 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+window.addEventListener("error", (e) => console.error("Global Error:", e.error));

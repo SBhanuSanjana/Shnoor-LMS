@@ -7,21 +7,31 @@ function StudentOverview() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ quizzesPassed: 0, totalQuizzes: 0, certsCount: 0 });
   const [activeCourse, setActiveCourse] = useState(null);
+  const [streakCount, setStreakCount] = useState(1);
   const [loading, setLoading] = useState(true);
 
 
 
+  const getMediaUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith("http")) return path;
+    const normalized = path.replace(/\\/g, '/');
+    return `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/${normalized.startsWith('/') ? normalized.slice(1) : normalized}`;
+  };
+
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const [resEnroll, resCerts] = await Promise.all([
+        const [resEnroll, resCerts, resStreak] = await Promise.all([
           api.get(`/api/courses/enrollments`),
-          api.get(`/api/courses/certificates`)
+          api.get(`/api/courses/certificates`),
+          api.post(`/api/accounts/streak`)
         ]);
         let enrolls = [];
         let certs = [];
         if ((resEnroll.status >= 200 && resEnroll.status < 300)) enrolls = resEnroll.data;
         if ((resCerts.status >= 200 && resCerts.status < 300)) certs = resCerts.data;
+        if ((resStreak.status >= 200 && resStreak.status < 300)) setStreakCount(resStreak.data.streak_count || 1);
 
         let totalQuizzes = 0;
         let quizzesPassed = 0;
@@ -36,7 +46,7 @@ function StudentOverview() {
           });
         });
 
-        const approvedCerts = certs.filter(r => r.status === "approved").length;
+        const approvedCerts = certs.filter(r => r.status?.toUpperCase() === "APPROVED").length;
         setStats({ quizzesPassed, totalQuizzes, certsCount: approvedCerts });
 
         const active = enrolls.find(e => {
@@ -55,7 +65,7 @@ function StudentOverview() {
             id: active.id,
             title: active.course.title,
             progress: pct,
-            image: active.course.thumbnail_file || active.course.thumbnail_url || "https://images.unsplash.com/photo-1633356122544-f134324a6cee?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+            image: getMediaUrl(active.course.thumbnail_file || active.course.thumbnail_url) || null,
             instructor: active.course.instructor?.full_name || active.course.instructor?.email
           });
         }
@@ -65,7 +75,6 @@ function StudentOverview() {
     };
     loadStats();
   }, []);
-
   const username = sessionStorage.getItem("username") || "Learner";
 
   return (
@@ -86,7 +95,7 @@ function StudentOverview() {
         <div className="bg-white/20 p-4 rounded-2xl backdrop-blur-sm border border-white/30 text-center min-w-[150px]">
           <div className="flex items-center justify-center gap-2 text-amber-300 font-bold text-xl mb-1">
             <Flame size={24} className="fill-amber-300" />
-            1 Day
+            {streakCount} {streakCount === 1 ? 'Day' : 'Days'}
           </div>
           <p className="text-xs font-semibold uppercase tracking-wider text-white">Learning Streak</p>
         </div>
@@ -94,7 +103,7 @@ function StudentOverview() {
 
       {loading ? (
         <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
@@ -109,18 +118,24 @@ function StudentOverview() {
                     onClick={() => navigate('/student-dashboard/courses')}
                     className="w-full sm:w-1/3 h-32 bg-slate-200 rounded-xl relative overflow-hidden group cursor-pointer"
                   >
-                    <img src={activeCourse.image} alt="Course Cover" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    {activeCourse.image ? (
+                      <img src={activeCourse.image} alt="Course Cover" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-blue-200 flex flex-col items-center justify-center text-indigo-400 group-hover:scale-105 transition-transform duration-500">
+                        <span className="text-xs font-bold mt-2">No Thumbnail</span>
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <PlayCircle size={48} className="text-white" />
                     </div>
                   </div>
                   <div className="flex-1 flex flex-col justify-center">
-                    <p className="text-xs font-bold text-blue-600 mb-1">IN PROGRESS</p>
+                    <p className="text-xs font-bold text-blue-950 mb-1">IN PROGRESS</p>
                     <h4 className="text-xl font-bold text-slate-900 mb-2">{activeCourse.title}</h4>
                     <p className="text-sm text-slate-500 mb-4">By {activeCourse.instructor}</p>
                     <div className="flex items-center gap-4">
                       <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${activeCourse.progress}%` }}></div>
+                        <div className="h-full bg-blue-950 rounded-full" style={{ width: `${activeCourse.progress}%` }}></div>
                       </div>
                       <span className="text-sm font-bold text-slate-700">{activeCourse.progress}%</span>
                     </div>

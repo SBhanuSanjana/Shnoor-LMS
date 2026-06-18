@@ -22,6 +22,7 @@ function CourseBuilder(){
   const[lesText,setLesText]=useState('');
   const[lesUrl,setLesUrl]=useState('');
   const[lesFile,setLesFile]=useState(null);
+  const[lesVttFile,setLesVttFile]=useState(null);
   const[showQuizModal,setShowQuizModal]=useState(false);
   const[quizTitle,setQuizTitle]=useState('');
   const[passingScore,setPassingScore]=useState(60);
@@ -105,9 +106,49 @@ function CourseBuilder(){
       }
     }catch(e){}
   };
+  const calculateDuration = (type, text, file, url) => {
+    return new Promise((resolve) => {
+      if (type === 'text') {
+        const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+        const seconds = Math.ceil((wordCount / 200) * 60);
+        resolve(seconds || 10);
+      } else if (type === 'image') {
+        resolve(10);
+      } else if (type === 'document') {
+        resolve(60);
+      } else if (type === 'video' || type === 'audio') {
+        if (!file && !url) return resolve(0);
+        
+        const media = type === 'video' ? document.createElement('video') : document.createElement('audio');
+        media.preload = 'metadata';
+        
+        media.onloadedmetadata = () => {
+          resolve(Math.floor(media.duration) || 0);
+          if(file) URL.revokeObjectURL(media.src);
+        };
+        
+        media.onerror = () => {
+          resolve(0);
+          if(file) URL.revokeObjectURL(media.src);
+        };
+
+        if (file) {
+          media.src = URL.createObjectURL(file);
+        } else if (url) {
+          media.src = url;
+        }
+      } else {
+        resolve(0);
+      }
+    });
+  };
+
   const handleAddLesson=async(e)=>{
     e.preventDefault();
     if(!lesTitle.trim())return;
+
+    const autoDuration = await calculateDuration(lesType, lesText, lesFile, lesUrl);
+
     const formData=new FormData();
     formData.append("title",lesTitle);
     formData.append("content_type",lesType);
@@ -123,6 +164,15 @@ function CourseBuilder(){
     }else if(lesType==='image'){
       if(lesFile)formData.append("image_file",lesFile);
       else if(lesUrl)formData.append("image_url",lesUrl);
+    }else if(lesType==='document'){
+      if(lesFile)formData.append("document_file",lesFile);
+      else if(lesUrl)formData.append("document_url",lesUrl);
+    }
+    if(autoDuration) {
+      formData.append("duration", autoDuration);
+    }
+    if(lesVttFile) {
+      formData.append("vtt_file", lesVttFile);
     }
     try{
       const res=await api.post(`/api/courses/modules/${selectedModId}/lessons`, formData);
@@ -131,6 +181,7 @@ function CourseBuilder(){
         setLesText('');
         setLesUrl('');
         setLesFile(null);
+        setLesVttFile(null);
         setShowLesModal(false);
         loadCourse();
       }
@@ -239,7 +290,7 @@ function CourseBuilder(){
   if(loading){
     return(
       <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-950"></div>
       </div>
     );
   }
@@ -261,9 +312,9 @@ function CourseBuilder(){
       </div>
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="border-b border-slate-200 bg-slate-50/50 p-4 flex gap-4 text-xs font-bold text-slate-400">
-          <span className={`pb-2 transition-all ${step===1?'border-b-2 border-blue-600 text-blue-600':'text-slate-400'}`}>1. General Info</span>
-          <span className={`pb-2 transition-all ${step===2?'border-b-2 border-blue-600 text-blue-600':'text-slate-400'}`}>2. Modules & Materials</span>
-          <span className={`pb-2 transition-all ${step===3?'border-b-2 border-blue-600 text-blue-600':'text-slate-400'}`}>3. Final Evaluation</span>
+          <span className={`pb-2 transition-all ${step===1?'border-b-2 border-blue-950 text-blue-950':'text-slate-400'}`}>1. General Info</span>
+          <span className={`pb-2 transition-all ${step===2?'border-b-2 border-blue-950 text-blue-950':'text-slate-400'}`}>2. Modules & Materials</span>
+          <span className={`pb-2 transition-all ${step===3?'border-b-2 border-blue-950 text-blue-950':'text-slate-400'}`}>3. Final Evaluation</span>
         </div>
         <div className="p-6">
           {step===1&&(
@@ -287,7 +338,7 @@ function CourseBuilder(){
                 </div>
               </div>
               <div className="pt-4 border-t border-slate-100 flex justify-end">
-                <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl text-sm hover:bg-blue-700 transition flex items-center gap-1.5 shadow">Save & Continue to Step 2</button>
+                <button type="submit" className="px-6 py-2.5 bg-yellow-500 text-blue-950 font-black font-bold rounded-xl text-sm hover:bg-blue-700 transition flex items-center gap-1.5 shadow">Save & Continue to Step 2</button>
               </div>
             </form>
           )}
@@ -295,7 +346,7 @@ function CourseBuilder(){
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-800">Step 2: Course Content & Modules</h3>
-                <button onClick={()=>setShowModModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 flex items-center gap-1.5 shadow"><Plus size={16}/> Add Module</button>
+                <button onClick={()=>setShowModModal(true)} className="bg-yellow-500 text-blue-950 font-black px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 flex items-center gap-1.5 shadow"><Plus size={16}/> Add Module</button>
               </div>
               <div className="space-y-4">
                 {regularModules.map((mod,index)=>(
@@ -320,8 +371,8 @@ function CourseBuilder(){
                       {mod.lessons?.map(lesson=>(
                         <div key={lesson.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl bg-slate-50/30">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                              {lesson.content_type==='video'?<Video size={18}/>:lesson.content_type==='audio'?<Music size={18}/>:lesson.content_type==='image'?<Image size={18}/>:<FileText size={18}/>}
+                            <div className="p-2 bg-blue-50 text-blue-950 rounded-lg">
+                              {lesson.content_type==='video'?<Video size={18}/>:lesson.content_type==='audio'?<Music size={18}/>:lesson.content_type==='image'?<Image size={18}/>:lesson.content_type==='document'?<File size={18}/>:<FileText size={18}/>}
                             </div>
                             <div>
                               <p className="text-sm font-bold text-slate-800">{lesson.title}</p>
@@ -348,7 +399,7 @@ function CourseBuilder(){
                           </div>
                         </div>
                       ))}
-                      <button onClick={()=>{setSelectedModId(mod.id);setShowLesModal(true);}} className="w-full py-3 mt-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-500 font-semibold text-sm hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center justify-center gap-2">
+                      <button onClick={()=>{setSelectedModId(mod.id);setShowLesModal(true);}} className="w-full py-3 mt-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-500 font-semibold text-sm hover:border-blue-300 hover:text-blue-950 transition-colors flex items-center justify-center gap-2">
                         <Plus size={16}/> Add Lesson / Material
                       </button>
                     </div>
@@ -360,7 +411,7 @@ function CourseBuilder(){
               </div>
               <div className="pt-4 border-t border-slate-100 flex justify-between">
                 <button onClick={()=>setStep(1)} className="px-6 py-2.5 border border-slate-200 text-slate-700 font-bold rounded-xl text-sm hover:bg-slate-50 transition">Back to Step 1</button>
-                <button onClick={()=>setStep(3)} className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl text-sm hover:bg-blue-700 transition">Continue to Step 3</button>
+                <button onClick={()=>setStep(3)} className="px-6 py-2.5 bg-yellow-500 text-blue-950 font-black font-bold rounded-xl text-sm hover:bg-blue-700 transition">Continue to Step 3</button>
               </div>
             </div>
           )}
@@ -413,7 +464,7 @@ function CourseBuilder(){
             <input type="text" value={modTitle} onChange={(e)=>setModTitle(e.target.value)} required placeholder="Module Title" className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-100 outline-none text-sm font-medium bg-slate-50"/>
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={()=>setShowModModal(false)} className="px-4 py-2 text-slate-500 text-xs font-bold hover:bg-slate-100 rounded-xl">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700">Add Module</button>
+              <button type="submit" className="px-4 py-2 bg-yellow-500 text-blue-950 font-black text-xs font-bold rounded-xl hover:bg-blue-700">Add Module</button>
             </div>
           </form>
         </div>
@@ -431,6 +482,7 @@ function CourseBuilder(){
               <option value="video">Video Lesson</option>
               <option value="audio">Audio Lesson</option>
               <option value="image">Image Lesson</option>
+              <option value="document">Document Lesson (PDF, PPT)</option>
             </select>
             {lesType==="text"&&(
               <textarea rows="5" value={lesText} onChange={(e)=>setLesText(e.target.value)} required placeholder="Enter lesson content text..." className="w-full p-2.5 border border-slate-200 rounded-xl outline-none bg-white" />
@@ -445,6 +497,10 @@ function CourseBuilder(){
                   <label className="block text-xs font-semibold text-slate-500 mb-1">OR Enter Video URL</label>
                   <input type="text" value={lesUrl} onChange={(e)=>setLesUrl(e.target.value)} placeholder="https://..." className="w-full p-2.5 border border-slate-200 rounded-xl outline-none bg-white"/>
                 </div>
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Upload Subtitles (.vtt file, optional)</label>
+                  <input type="file" accept=".vtt" onChange={(e)=>setLesVttFile(e.target.files[0])} className="w-full p-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"/>
+                </div>
               </div>
             )}
             {lesType==="audio"&&(
@@ -456,6 +512,10 @@ function CourseBuilder(){
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">OR Enter Audio URL</label>
                   <input type="text" value={lesUrl} onChange={(e)=>setLesUrl(e.target.value)} placeholder="https://..." className="w-full p-2.5 border border-slate-200 rounded-xl outline-none bg-white"/>
+                </div>
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Upload Subtitles (.vtt file, optional)</label>
+                  <input type="file" accept=".vtt" onChange={(e)=>setLesVttFile(e.target.files[0])} className="w-full p-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"/>
                 </div>
               </div>
             )}
@@ -471,9 +531,21 @@ function CourseBuilder(){
                 </div>
               </div>
             )}
+            {lesType==="document"&&(
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Upload Document File (.pdf, .ppt, .pptx)</label>
+                  <input type="file" accept=".pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(e)=>setLesFile(e.target.files[0])} className="w-full p-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">OR Enter Document URL</label>
+                  <input type="text" value={lesUrl} onChange={(e)=>setLesUrl(e.target.value)} placeholder="https://..." className="w-full p-2.5 border border-slate-200 rounded-xl outline-none bg-white"/>
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={()=>setShowLesModal(false)} className="px-4 py-2 text-slate-500 text-xs font-bold hover:bg-slate-100 rounded-xl">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700">Add Lesson</button>
+              <button type="submit" className="px-4 py-2 bg-yellow-500 text-blue-950 font-black text-xs font-bold rounded-xl hover:bg-blue-700">Add Lesson</button>
             </div>
           </form>
         </div>
@@ -492,7 +564,7 @@ function CourseBuilder(){
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={()=>setShowQuizModal(false)} className="px-4 py-2 text-slate-500 text-xs font-bold hover:bg-slate-100 rounded-xl">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700">Add Quiz</button>
+              <button type="submit" className="px-4 py-2 bg-yellow-500 text-blue-950 font-black text-xs font-bold rounded-xl hover:bg-blue-700">Add Quiz</button>
             </div>
           </form>
         </div>
@@ -544,7 +616,7 @@ function CourseBuilder(){
             )}
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={()=>setShowQuesModal(false)} className="px-4 py-2 text-slate-500 text-xs font-bold hover:bg-slate-100 rounded-xl">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700">Add Question</button>
+              <button type="submit" className="px-4 py-2 bg-yellow-500 text-blue-950 font-black text-xs font-bold rounded-xl hover:bg-blue-700">Add Question</button>
             </div>
           </form>
         </div>

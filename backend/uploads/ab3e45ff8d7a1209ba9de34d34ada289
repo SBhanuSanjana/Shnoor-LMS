@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.500
+Django is a Python web framework used to build web applications quickly.
+
+00:00:04.500 --> 00:00:09.000
+Django makes it easier to build better web apps with less code.
+
+00:00:09.000 --> 00:00:14.000
+It provides built-in features such as routing, database models, admin panel, and security.
+
+00:00:14.000 --> 00:00:19.000
+Developers can use Django to create scalable and maintainable backend applications.
+
+00:00:19.000 --> 00:00:24.000
+Learners can follow this lesson to understand the basics of Django web development.

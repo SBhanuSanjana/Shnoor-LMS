@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { PlayCircle, Clock, CheckCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 import api from '../../../api';
 
 function StudentQuizzes() {
+  const location = useLocation();
+  const searchTerm = location.state?.searchTerm || '';
   const [activeView, setActiveView] = useState('list');
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [enrollments, setEnrollments] = useState([]);
@@ -110,7 +113,7 @@ function StudentQuizzes() {
                             setQuizAnswers({ ...quizAnswers, [q.id]: optKey });
                           }
                         }}
-                        className="w-5 h-5 text-blue-600 focus:ring-blue-500"
+                        className="w-5 h-5 text-blue-950 focus:ring-blue-500"
                       />
                       <span className="text-slate-700 font-medium">{optKey}. {optText}</span>
                     </label>
@@ -123,7 +126,7 @@ function StudentQuizzes() {
 
         <div className="flex justify-end gap-3">
           <button onClick={() => setActiveView('list')} className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">Cancel</button>
-          <button onClick={handleSubmitQuiz} disabled={submitting} className="px-8 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-md disabled:opacity-50 transition-colors">
+          <button onClick={handleSubmitQuiz} disabled={submitting} className="px-8 py-3 rounded-xl bg-yellow-500 text-blue-950 font-black font-bold hover:bg-blue-700 shadow-md disabled:opacity-50 transition-colors">
             {submitting ? "Submitting..." : "Submit Quiz"}
           </button>
         </div>
@@ -149,7 +152,7 @@ function StudentQuizzes() {
             </div>
             <div>
               <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Status</p>
-              <p className="text-4xl font-black text-blue-600">{quizResult?.score}/{quizResult?.total}</p>
+              <p className="text-4xl font-black text-blue-950">{quizResult?.score}/{quizResult?.total}</p>
             </div>
           </div>
           <div className="flex gap-4 justify-center">
@@ -160,8 +163,46 @@ function StudentQuizzes() {
     );
   }
 
+  const totalQuizzes = quizzes.length;
+  const passedQuizzes = quizzes.filter(q => q.passed).length;
+  const pendingQuizzes = totalQuizzes - passedQuizzes;
+
   return (
     <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">My Quizzes</h2>
+        <p className="text-slate-500 text-sm mt-1">Test your knowledge and track your scores</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
+          <div className="w-14 h-14 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
+            <PlayCircle size={28} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-black text-slate-800 leading-tight">{totalQuizzes}</h3>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mt-1">Total Quizzes</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
+          <div className="w-14 h-14 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+            <CheckCircle size={28} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-black text-slate-800 leading-tight">{passedQuizzes}</h3>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mt-1">Passed</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
+          <div className="w-14 h-14 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center shrink-0">
+            <Clock size={28} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-black text-slate-800 leading-tight">{pendingQuizzes}</h3>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mt-1">Pending</p>
+          </div>
+        </div>
+      </div>
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-200">
           <h3 className="text-lg font-bold text-slate-900">Your Quizzes</h3>
@@ -172,7 +213,9 @@ function StudentQuizzes() {
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {quizzes.map((quiz) => (
+            {quizzes
+              .filter(q => !searchTerm || q.title.toLowerCase().includes(searchTerm.toLowerCase()) || q.course.toLowerCase().includes(searchTerm.toLowerCase()))
+              .map((quiz) => (
               <div key={quiz.id} className="p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1">
@@ -190,7 +233,7 @@ function StudentQuizzes() {
                   {quiz.status === 'pending' || !quiz.passed ? (
                     <button 
                       onClick={() => handleStartQuiz(quiz)}
-                      className="w-full md:w-auto px-6 py-2.5 bg-blue-950 hover:bg-blue-900 text-white rounded-xl font-bold text-sm shadow-md shadow-blue-950/20 transition-colors flex items-center justify-center gap-2"
+                      className="w-full md:w-auto px-6 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-blue-950 font-black shadow-[0_4px_20px_-4px_rgba(234,179,8,0.5)] rounded-xl font-bold text-sm shadow-md shadow-blue-950/20 transition-colors flex items-center justify-center gap-2"
                     >
                       <PlayCircle size={18} /> {quiz.status === 'completed' ? 'Retake Quiz' : 'Start Quiz'}
                     </button>
@@ -205,7 +248,7 @@ function StudentQuizzes() {
                 </div>
               </div>
             ))}
-            {quizzes.length === 0 && (
+            {quizzes.filter(q => !searchTerm || q.title.toLowerCase().includes(searchTerm.toLowerCase()) || q.course.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
               <div className="p-12 text-center text-slate-500">No quizzes available.</div>
             )}
           </div>
