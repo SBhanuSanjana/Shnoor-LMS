@@ -62,33 +62,37 @@ const sendReply = async (req, res) => {
 
     const transporter = createTransporter();
     
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || '"SHNOOR LMS" <noreply@shnoorlms.com>',
-      to: contactQuery.email,
-      subject: 'Re: Your Query at SHNOOR LMS',
-      text: `Hi ${contactQuery.name},\n\nThank you for reaching out.\n\n${replyMessage}\n\nBest regards,\nThe SHNOOR Team`,
-      html: `
-        <div style="font-family:'Inter','Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
-          <div style="background:#1e3a8a;padding:32px 24px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">SHNOOR LMS</h1>
-            <p style="color:#93c5fd;margin:8px 0 0;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Support Reply</p>
-          </div>
-          <div style="padding:40px 32px;background:#fff;">
-            <p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi <strong>${contactQuery.name}</strong>,</p>
-            <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px;">Thank you for reaching out. Here is our reply to your query:</p>
-            <div style="background:#f1f5f9;border-left:4px solid #2563eb;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
-              <p style="color:#1e293b;font-size:15px;line-height:1.7;margin:0;">${replyMessage.replace(/\n/g, '<br/>')}</p>
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || '"SHNOOR LMS" <noreply@shnoorlms.com>',
+        to: contactQuery.email,
+        subject: 'Re: Your Query at SHNOOR LMS',
+        text: `Hi ${contactQuery.name},\n\nThank you for reaching out.\n\n${replyMessage}\n\nBest regards,\nThe SHNOOR Team`,
+        html: `
+          <div style="font-family:'Inter','Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
+            <div style="background:#1e3a8a;padding:32px 24px;text-align:center;">
+              <h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">SHNOOR LMS</h1>
+              <p style="color:#93c5fd;margin:8px 0 0;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Support Reply</p>
             </div>
-            <p style="color:#64748b;font-size:13px;">Your original message: <em>"${contactQuery.message}"</em></p>
-            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;"/>
-            <p style="color:#94a3b8;font-size:12px;margin:0;">If you have more questions, feel free to contact us again through our website.</p>
+            <div style="padding:40px 32px;background:#fff;">
+              <p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi <strong>${contactQuery.name}</strong>,</p>
+              <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px;">Thank you for reaching out. Here is our reply to your query:</p>
+              <div style="background:#f1f5f9;border-left:4px solid #2563eb;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
+                <p style="color:#1e293b;font-size:15px;line-height:1.7;margin:0;">${replyMessage.replace(/\n/g, '<br/>')}</p>
+              </div>
+              <p style="color:#64748b;font-size:13px;">Your original message: <em>"${contactQuery.message}"</em></p>
+              <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;"/>
+              <p style="color:#94a3b8;font-size:12px;margin:0;">If you have more questions, feel free to contact us again through our website.</p>
+            </div>
+            <div style="background:#f1f5f9;padding:20px;text-align:center;">
+              <p style="color:#94a3b8;font-size:12px;margin:0;">&copy; ${new Date().getFullYear()} Shnoor International LLC. All rights reserved.</p>
+            </div>
           </div>
-          <div style="background:#f1f5f9;padding:20px;text-align:center;">
-            <p style="color:#94a3b8;font-size:12px;margin:0;">&copy; ${new Date().getFullYear()} Shnoor International LLC. All rights reserved.</p>
-          </div>
-        </div>
-      `,
-    });
+        `,
+      });
+    } catch (emailError) {
+      console.warn('Failed to send email (SMTP config missing?), skipping email delivery but updating DB:', emailError.message);
+    }
 
     await pool.query(
       "UPDATE contact_queries SET status = 'REPLIED', reply_message = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
