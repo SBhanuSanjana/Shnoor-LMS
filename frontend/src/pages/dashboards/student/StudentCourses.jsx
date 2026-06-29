@@ -622,6 +622,7 @@ function StudentCourses() {
                       key={activeLesson.id}
                       src={getMediaUrl(activeLesson.video_file || activeLesson.video_url)}
                       controls
+                      crossOrigin={activeLesson.vtt_file ? "anonymous" : undefined}
                       controlsList={canComplete ? undefined : "nodownload"}
                     onContextMenu={e => { if (!canComplete) e.preventDefault(); }}
                     onLoadedMetadata={(e) => {
