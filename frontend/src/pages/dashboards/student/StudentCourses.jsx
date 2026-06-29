@@ -1093,7 +1093,8 @@ function StudentCourses() {
             </div>
           )}
         </div>
-        </>
+      )}
+      </>
       )}
 
       {previewCourseId && (
