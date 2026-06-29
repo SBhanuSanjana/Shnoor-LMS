@@ -256,7 +256,10 @@ function CourseBuilder(){
         setShowLesModal(false);
         loadCourse();
       }
-    }catch(e){}
+    }catch(e){
+      console.error("Lesson creation error:", e);
+      alert(e.response?.data?.error || e.message || "An error occurred while adding the lesson");
+    }
   };
   const handleAddQuiz=async(e)=>{
     e.preventDefault();
