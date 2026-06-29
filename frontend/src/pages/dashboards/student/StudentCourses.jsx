@@ -932,8 +932,10 @@ function StudentCourses() {
 
   return (
     <div className="space-y-8">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-slate-100 shadow-sm">
+      {!previewCourseId && (
+        <>
+          {/* Header Section */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-slate-100 shadow-sm">
         
         {/* Segmented Control Tabs */}
         <div className="flex bg-slate-100/80 p-1 rounded-xl shadow-inner border border-slate-200/50">
@@ -1091,13 +1093,14 @@ function StudentCourses() {
             </div>
           )}
         </div>
+        </>
       )}
 
       {previewCourseId && (
-        <div className="fixed inset-y-0 right-0 left-60 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto" onClick={closePreview}>
-          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-            <button onClick={closePreview} className="absolute top-4 right-4 bg-black/10 hover:bg-black/20 text-slate-800 p-2 rounded-full transition-colors z-10">
-              <X size={20} />
+        <div className="w-full animate-in fade-in zoom-in-95 duration-300">
+          <div className="bg-white rounded-3xl w-full border border-slate-200 shadow-sm relative flex flex-col overflow-hidden min-h-[calc(100vh-8rem)]">
+            <button onClick={closePreview} className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm hover:bg-slate-100 text-slate-800 px-4 py-2 rounded-xl transition-colors z-10 shadow border border-slate-200 flex items-center gap-2 font-bold text-sm">
+              <X size={18} /> Back to Courses
             </button>
             
             {/* Header Banner */}
