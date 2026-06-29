@@ -608,13 +608,21 @@ function StudentCourses() {
             <div className="space-y-5 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <h3 className="text-xl font-bold text-slate-900">{activeLesson.title}</h3>
               {activeLesson.content_type?.toLowerCase() === "video" && (activeLesson.video_file || activeLesson.video_url) && (
-                <div className="bg-black rounded-xl overflow-hidden aspect-video max-h-[360px] flex items-center justify-center">
-                  <video
-                    ref={videoRef}
-                    key={activeLesson.id}
-                    src={getMediaUrl(activeLesson.video_file || activeLesson.video_url)}
-                    controls
-                    controlsList={canComplete ? undefined : "nodownload"}
+                <div className="bg-black rounded-xl overflow-hidden aspect-video max-h-[360px] w-full flex items-center justify-center">
+                  {(activeLesson.video_url && (activeLesson.video_url.includes('youtube.com') || activeLesson.video_url.includes('youtu.be') || activeLesson.video_url.includes('vimeo.com'))) ? (
+                    <iframe
+                      className="w-full h-full"
+                      src={activeLesson.video_url.replace('watch?v=', 'embed/').replace('youtu.be/', 'youtube.com/embed/')}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    ></iframe>
+                  ) : (
+                    <video
+                      ref={videoRef}
+                      key={activeLesson.id}
+                      src={getMediaUrl(activeLesson.video_file || activeLesson.video_url)}
+                      controls
+                      controlsList={canComplete ? undefined : "nodownload"}
                     onContextMenu={e => { if (!canComplete) e.preventDefault(); }}
                     onLoadedMetadata={(e) => {
                       const userIdentifier = sessionStorage.getItem("email") || sessionStorage.getItem("username") || "guest";
@@ -678,6 +686,7 @@ function StudentCourses() {
                   >
                     {activeLesson.vtt_file && <track kind="subtitles" src={getMediaUrl(activeLesson.vtt_file)} srcLang="en" label="English" default />}
                   </video>
+                  )}
                 </div>
               )}
               {activeLesson.content_type?.toLowerCase() === "video" && !(activeLesson.video_file || activeLesson.video_url) && (
