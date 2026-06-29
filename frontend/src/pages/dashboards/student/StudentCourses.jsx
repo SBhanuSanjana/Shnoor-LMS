@@ -1094,7 +1094,7 @@ function StudentCourses() {
       )}
 
       {previewCourseId && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto" onClick={closePreview}>
+        <div className="fixed inset-y-0 right-0 left-60 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto" onClick={closePreview}>
           <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <button onClick={closePreview} className="absolute top-4 right-4 bg-black/10 hover:bg-black/20 text-slate-800 p-2 rounded-full transition-colors z-10">
               <X size={20} />
