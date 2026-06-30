@@ -11,6 +11,7 @@ const socketManager = require('./socketManager');
 const chatRoutes = require('./chatRoutes');
 const orgAdmin = require('./orgAdmin');
 const searchRoutes = require('./searchRoutes');
+const { cacheMiddleware } = require('./helpers/cacheMiddleware');
 const path = require('path');
 
 dotenv.config();
@@ -1778,7 +1779,7 @@ app.post('/api/courses/:courseId/certificate', authMiddleware(), requestCertific
 app.get('/api/courses/:id', authMiddleware(), getCourseById);
 
 // Leaderboard API
-app.get('/api/leaderboard', async (req, res) => {
+app.get('/api/leaderboard', cacheMiddleware(300), async (req, res) => {
   try {
     const { courseId } = req.query;
     let query = `
@@ -1808,7 +1809,7 @@ app.get('/api/leaderboard', async (req, res) => {
 });
 
 // --- PUBLIC STATS ---
-app.get('/api/public/stats', async (req, res) => {
+app.get('/api/public/stats', cacheMiddleware(300), async (req, res) => {
   try {
     const activeUsersResult = await pool.query("SELECT COUNT(*) FROM users WHERE is_active = true");
     const publishedCoursesResult = await pool.query("SELECT COUNT(*) FROM courses WHERE is_published = true");
@@ -1828,7 +1829,7 @@ app.get('/api/public/stats', async (req, res) => {
 });
 
 // --- SUBSCRIPTIONS & PLANS ---
-app.get('/api/plans', async (req, res) => {
+app.get('/api/plans', cacheMiddleware(300), async (req, res) => {
   try {
     const { plan_type } = req.query;
     let query = `
