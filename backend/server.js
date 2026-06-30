@@ -348,6 +348,7 @@ const resetPasswordWithToken = async (req, res) => {
 const getPendingCourses = async (req, res) => {
   if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
+  // --- DATABASE OPTIMIZATION: Header-Based Pagination ---
   const limit = parseInt(req.query.limit) || 1000;
   const page = parseInt(req.query.page) || 1;
   const offset = (page - 1) * limit;
@@ -579,6 +580,7 @@ const requestCertificate = async (req, res) => {
 
 // Course Controller
 const getApprovedCourses = async (req, res) => {
+  // --- DATABASE OPTIMIZATION: Header-Based Pagination ---
   const limit = parseInt(req.query.limit) || 1000;
   const page = parseInt(req.query.page) || 1;
   const offset = (page - 1) * limit;
@@ -893,7 +895,8 @@ const enrollCourse = async (req, res) => {
       
       const pIds = prereqResult.rows.map(r => r.prerequisite_id);
       
-      // Bulk Fetch All Required Data Once
+      // --- QUERY OPTIMIZATION: N+1 Resolution ---
+      // Bulk Fetch All Required Data Once to eliminate nested database looping
       const cNameRes = await pool.query('SELECT id, title FROM courses WHERE id = ANY($1)', [pIds]);
       const courseNames = cNameRes.rows.reduce((acc, c) => ({...acc, [c.id]: c.title}), {});
       
@@ -1803,7 +1806,7 @@ app.post('/api/courses/:courseId/certificate', authMiddleware(), requestCertific
 // Generic course ID route (Must be defined last to avoid shadowing other /api/courses/* routes)
 app.get('/api/courses/:id', authMiddleware(), getCourseById);
 
-// Leaderboard API
+// --- DATABASE OPTIMIZATION: In-Memory Caching (via node-cache) ---
 app.get('/api/leaderboard', cacheMiddleware(300), async (req, res) => {
   try {
     const { courseId } = req.query;
