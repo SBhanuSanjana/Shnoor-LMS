@@ -1,16 +1,45 @@
 const express = require('express');
 const pool = require('./db');
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 
-const createTransporter = () =>
-  nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-    port: parseInt(process.env.EMAIL_PORT || '587'),
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+const createTransporter = () => {
+  return {
+    sendMail: async (mailOptions) => {
+      const apiKey = process.env.BREVO_API_KEY || process.env.EMAIL_PASS;
+      
+      const fromStr = mailOptions.from || process.env.EMAIL_FROM || 'noreply@shnoorlms.com';
+      let senderName = 'Shnoor LMS';
+      let senderEmail = fromStr;
+      if (fromStr.includes('<') && fromStr.includes('>')) {
+        const parts = fromStr.split('<');
+        senderName = parts[0].replace(/"/g, '').trim() || 'Shnoor LMS';
+        senderEmail = parts[1].replace('>', '').trim();
+      }
+      const sender = { name: senderName, email: senderEmail };
+
+      const data = {
+        sender,
+        to: [{ email: mailOptions.to }],
+        subject: mailOptions.subject,
+      };
+      if (mailOptions.html) data.htmlContent = mailOptions.html;
+      if (mailOptions.text) data.textContent = mailOptions.text;
+
+      try {
+        await axios.post('https://api.brevo.com/v3/smtp/email', data, {
+          headers: {
+            'api-key': apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        });
+      } catch (error) {
+        console.error("Brevo API error:", error.response?.data || error.message);
+        throw error;
+      }
+    }
+  };
+};
 
 // POST /api/contact — public, no auth required
 const submitQuery = async (req, res) => {
@@ -62,37 +91,33 @@ const sendReply = async (req, res) => {
 
     const transporter = createTransporter();
     
-    try {
-      await transporter.sendMail({
-        from: process.env.EMAIL_FROM || '"SHNOOR LMS" <noreply@shnoorlms.com>',
-        to: contactQuery.email,
-        subject: 'Re: Your Query at SHNOOR LMS',
-        text: `Hi ${contactQuery.name},\n\nThank you for reaching out.\n\n${replyMessage}\n\nBest regards,\nThe SHNOOR Team`,
-        html: `
-          <div style="font-family:'Inter','Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
-            <div style="background:#1e3a8a;padding:32px 24px;text-align:center;">
-              <h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">SHNOOR LMS</h1>
-              <p style="color:#93c5fd;margin:8px 0 0;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Support Reply</p>
-            </div>
-            <div style="padding:40px 32px;background:#fff;">
-              <p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi <strong>${contactQuery.name}</strong>,</p>
-              <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px;">Thank you for reaching out. Here is our reply to your query:</p>
-              <div style="background:#f1f5f9;border-left:4px solid #2563eb;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
-                <p style="color:#1e293b;font-size:15px;line-height:1.7;margin:0;">${replyMessage.replace(/\n/g, '<br/>')}</p>
-              </div>
-              <p style="color:#64748b;font-size:13px;">Your original message: <em>"${contactQuery.message}"</em></p>
-              <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;"/>
-              <p style="color:#94a3b8;font-size:12px;margin:0;">If you have more questions, feel free to contact us again through our website.</p>
-            </div>
-            <div style="background:#f1f5f9;padding:20px;text-align:center;">
-              <p style="color:#94a3b8;font-size:12px;margin:0;">&copy; ${new Date().getFullYear()} Shnoor International LLC. All rights reserved.</p>
-            </div>
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || '"SHNOOR LMS" <noreply@shnoorlms.com>',
+      to: contactQuery.email,
+      subject: 'Re: Your Query at SHNOOR LMS',
+      text: `Hi ${contactQuery.name},\n\nThank you for reaching out.\n\n${replyMessage}\n\nBest regards,\nThe SHNOOR Team`,
+      html: `
+        <div style="font-family:'Inter','Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
+          <div style="background:#1e3a8a;padding:32px 24px;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:28px;font-weight:800;">SHNOOR LMS</h1>
+            <p style="color:#93c5fd;margin:8px 0 0;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Support Reply</p>
           </div>
-        `,
-      });
-    } catch (emailError) {
-      console.warn('Failed to send email (SMTP config missing?), skipping email delivery but updating DB:', emailError.message);
-    }
+          <div style="padding:40px 32px;background:#fff;">
+            <p style="color:#475569;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi <strong>${contactQuery.name}</strong>,</p>
+            <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px;">Thank you for reaching out. Here is our reply to your query:</p>
+            <div style="background:#f1f5f9;border-left:4px solid #2563eb;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
+              <p style="color:#1e293b;font-size:15px;line-height:1.7;margin:0;">${replyMessage.replace(/\n/g, '<br/>')}</p>
+            </div>
+            <p style="color:#64748b;font-size:13px;">Your original message: <em>"${contactQuery.message}"</em></p>
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;"/>
+            <p style="color:#94a3b8;font-size:12px;margin:0;">If you have more questions, feel free to contact us again through our website.</p>
+          </div>
+          <div style="background:#f1f5f9;padding:20px;text-align:center;">
+            <p style="color:#94a3b8;font-size:12px;margin:0;">&copy; ${new Date().getFullYear()} Shnoor International LLC. All rights reserved.</p>
+          </div>
+        </div>
+      `,
+    });
 
     await pool.query(
       "UPDATE contact_queries SET status = 'REPLIED', reply_message = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
@@ -110,7 +135,7 @@ const sendReply = async (req, res) => {
 module.exports = (authMiddleware) => {
   const router = express.Router();
   router.post('/', submitQuery);                               // public
-  router.get('/', authMiddleware(['ADMIN']), getAllQueries);    // admin only
-  router.post('/:id/reply', authMiddleware(['ADMIN']), sendReply); // admin only
+  router.get('/', authMiddleware(['admin']), getAllQueries);    // admin only
+  router.post('/:id/reply', authMiddleware(['admin']), sendReply); // admin only
   return router;
 };

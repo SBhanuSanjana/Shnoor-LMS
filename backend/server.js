@@ -348,7 +348,13 @@ const resetPasswordWithToken = async (req, res) => {
 const getPendingCourses = async (req, res) => {
   if (req.user.role !== 'ORGANIZATION_ADMIN' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Access denied' });
 
+  const limit = parseInt(req.query.limit) || 1000;
+  const page = parseInt(req.query.page) || 1;
+  const offset = (page - 1) * limit;
+
   try {
+    const countRes = await pool.query('SELECT COUNT(*) FROM courses WHERE is_approved = false AND is_published = true');
+    const totalCount = countRes.rows[0].count;
     const query = `
       SELECT 
         c.*,
@@ -360,8 +366,11 @@ const getPendingCourses = async (req, res) => {
       FROM courses c
       LEFT JOIN users u ON c.instructor_id = u.id
       WHERE c.is_approved = false AND c.is_published = true
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, [limit, offset]);
+    res.setHeader('X-Total-Count', totalCount);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -570,7 +579,12 @@ const requestCertificate = async (req, res) => {
 
 // Course Controller
 const getApprovedCourses = async (req, res) => {
+  const limit = parseInt(req.query.limit) || 1000;
+  const page = parseInt(req.query.page) || 1;
+  const offset = (page - 1) * limit;
   try {
+    const countRes = await pool.query('SELECT COUNT(*) FROM courses WHERE is_approved = true');
+    const totalCount = countRes.rows[0].count;
     const query = `
       SELECT 
         c.*,
@@ -595,8 +609,11 @@ const getApprovedCourses = async (req, res) => {
       FROM courses c
       LEFT JOIN users u ON c.instructor_id = u.id
       WHERE c.is_approved = $1
+      LIMIT $2 OFFSET $3
     `;
-    const result = await pool.query(query, [true]);
+    const result = await pool.query(query, [true, limit, offset]);
+    res.setHeader('X-Total-Count', totalCount);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -1261,7 +1278,12 @@ app.post('/api/accounts/streak', authMiddleware(), async (req, res) => {
 
 // Super Admin User Controllers
 const getAllUsers = async (req, res) => {
+  const limit = parseInt(req.query.limit) || 1000;
+  const page = parseInt(req.query.page) || 1;
+  const offset = (page - 1) * limit;
   try {
+    const countRes = await pool.query('SELECT COUNT(*) FROM users');
+    const totalCount = countRes.rows[0].count;
     const query = `
       SELECT u.*, 
              o.name AS org_name, 
@@ -1272,8 +1294,11 @@ const getAllUsers = async (req, res) => {
       FROM users u
       LEFT JOIN organizations o ON u.organization_id = o.id
       ORDER BY u.created_at DESC
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, [limit, offset]);
+    res.setHeader('X-Total-Count', totalCount);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
     res.json(result.rows);
   } catch (error) {
     console.error(error);

@@ -478,11 +478,7 @@ function AdminDashboard() {
   };
   const menuItems = [
     "Overview",
-    "Learner Management",
-    "Employee Approvals",
-    "Instructor Approvals",
-    "Organization Approvals",
-    "Approved Accounts",
+    "User Approvals",
     "Manage Courses",
     "Certificate Approvals",
     "Subscription Plans",
@@ -687,7 +683,7 @@ function AdminDashboard() {
                   <div className="lg:col-span-3 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col">
                     <div className="flex justify-between items-center mb-6">
                       <h3 className="text-lg font-extrabold text-slate-800">Recent Approvals</h3>
-                      <button onClick={() => setActivePage("Approved Accounts")} className="text-sm font-bold text-blue-950 hover:text-blue-700 transition">View All</button>
+                      <button onClick={() => setActivePage("User Approvals")} className="text-sm font-bold text-blue-950 hover:text-blue-700 transition">View All</button>
                     </div>
                     <div className="space-y-4 flex-1">
                       {allApprovedAccounts.length === 0 ? (
@@ -813,19 +809,19 @@ function AdminDashboard() {
               </div>
             );
           })()}
-          {activePage === "Learner Management" && (
+          {activePage === "User Approvals" && (
             <TabbedSection
-              activeTitle="Active Learners"
+              activeTitle="Active Users"
               pendingTitle="Pending Approvals"
-              activeData={learners}
-              pendingData={learnerRequests}
-              typeName="Learners"
+              activeData={allApprovedAccounts}
+              pendingData={pendingUsers}
+              typeName="Users"
               sortOption={userManagementSort}
               setSortOption={setUserManagementSort}
               renderActiveTable={(data) => (
                 <UserTable
                   users={data}
-                  type="learner"
+                  type="all"
                   pendingCertificates={pendingCertificates}
                   handleCertificateAction={handleCertificateAction}
                 />
@@ -835,115 +831,12 @@ function AdminDashboard() {
                   users={data.map(u => ({ ...u, _status: 'pending' }))}
                   approveUser={approveUser}
                   rejectUser={rejectUser}
-                  type="learner"
+                  type="all"
                 />
               )}
             />
           )}
-          {activePage === "Employee Approvals" && (
-            <TabbedSection
-              activeTitle="Active Employees"
-              pendingTitle="Pending Approvals"
-              activeData={approvedEmployees}
-              pendingData={employeeRequests}
-              typeName="Employees"
-              sortOption={userManagementSort}
-              setSortOption={setUserManagementSort}
-              renderActiveTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'approved' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="employee"
-                />
-              )}
-              renderPendingTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'pending' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="employee"
-                />
-              )}
-            />
-          )}
-          {activePage === "Instructor Approvals" && (
-            <TabbedSection
-              activeTitle="Active Instructors"
-              pendingTitle="Pending Approvals"
-              activeData={allApprovedAccounts.filter(u => u.role === "Instructor")}
-              pendingData={instructorRequests}
-              typeName="Instructors"
-              sortOption={userManagementSort}
-              setSortOption={setUserManagementSort}
-              renderActiveTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'approved' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="instructor"
-                />
-              )}
-              renderPendingTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'pending' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="instructor"
-                />
-              )}
-            />
-          )}
-          {activePage === "Organization Approvals" && (
-            <TabbedSection
-              activeTitle="Active Organizations"
-              pendingTitle="Pending Approvals"
-              activeData={allApprovedAccounts.filter(u => u.role === "Organization Admin")}
-              pendingData={organizationRequests}
-              typeName="Organizations"
-              sortOption={userManagementSort}
-              setSortOption={setUserManagementSort}
-              renderActiveTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'approved' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="organization"
-                />
-              )}
-              renderPendingTable={(data) => (
-                <ApprovalTable
-                  users={data.map(u => ({ ...u, _status: 'pending' }))}
-                  approveUser={approveUser}
-                  rejectUser={rejectUser}
-                  type="organization"
-                />
-              )}
-            />
-          )}
-          {activePage === "Approved Accounts" && (
-            <div className="space-y-4 animate-fade-in-up">
-              <UserTable
-                title="Approved Accounts"
-                headerAction={
-                  <select
-                    value={approvedAccountsSort}
-                    onChange={(e) => setApprovedAccountsSort(e.target.value)}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                  >
-                    <option value="Newest">Sort by: Newest</option>
-                    <option value="Oldest">Sort by: Oldest</option>
-                    <option value="Title A-Z">Name A-Z</option>
-                    <option value="Title Z-A">Name Z-A</option>
-                  </select>
-                }
-                users={sortedApprovedAccounts}
-                type="all"
-                pendingCertificates={pendingCertificates}
-                handleCertificateAction={handleCertificateAction}
-              />
-            </div>
-          )}
+
           {activePage === "Manage Courses" && renderCoursesView()}
           {activePage === "Certificate Approvals" && renderCertificatesView()}
           {activePage === "Subscription Plans" && (
@@ -1363,6 +1256,9 @@ function ApprovalTable({ users, approveUser, rejectUser, type }) {
               <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[25%]">User Details</th>
               <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[20%]">Contact</th>
               <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap w-[15%]">Role</th>
+              {type === "all" && (
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Additional Details</th>
+              )}
               {type === "employee" && (
                 <>
                   <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Emp ID</th>
@@ -1415,8 +1311,26 @@ function ApprovalTable({ users, approveUser, rejectUser, type }) {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-xs font-bold text-slate-700 capitalize">{user.role.replace('_', ' ')}</span>
+                    <span className="text-xs font-bold text-slate-700 capitalize">{user.role ? user.role.replace('_', ' ') : 'User'}</span>
                   </td>
+                  {type === "all" && (
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex flex-col gap-1">
+                        {user.role === 'Learner' && user.learnerType === 'Employee' && (
+                           <span className="text-[10px] font-medium text-slate-500">Emp ID: {user.employeeId || "-"} | Org Code: {user.organizationCode || "-"}</span>
+                        )}
+                        {user.role === 'Learner' && user.learnerType !== 'Employee' && (
+                           <span className="text-[10px] font-medium text-slate-500">{user.learnerType || "Independent Learner"}</span>
+                        )}
+                        {user.role === 'Organization Admin' && (
+                           <span className="text-[10px] font-medium text-slate-500">Org Code: {user.organizationCode || "-"} | Loc: {user.location || "-"}</span>
+                        )}
+                        {user.role === 'Instructor' && (
+                           <span className="text-[10px] font-medium text-slate-500">Joined: {user.created_at ? new Date(user.created_at).toLocaleDateString() : "-"}</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
                   {type === "employee" && (
                     <>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-600">{user.employeeId || "-"}</td>
