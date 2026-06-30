@@ -873,20 +873,52 @@ const enrollCourse = async (req, res) => {
       const missingPrereqs = [];
       const { canRequestCertificate } = require('./helpers/examValidation');
       
+      const pIds = prereqResult.rows.map(r => r.prerequisite_id);
+      
+      // Bulk Fetch All Required Data Once
+      const cNameRes = await pool.query('SELECT id, title FROM courses WHERE id = ANY($1)', [pIds]);
+      const courseNames = cNameRes.rows.reduce((acc, c) => ({...acc, [c.id]: c.title}), {});
+      
+      const pCheckRes = await pool.query('SELECT id, course_id, completed_at FROM enrollments WHERE student_id = $1 AND course_id = ANY($2)', [studentId, pIds]);
+      const enrollments = pCheckRes.rows.reduce((acc, e) => ({...acc, [e.course_id]: e}), {});
+      const pEnrollIds = pCheckRes.rows.map(e => e.id);
+
+      const totalRes = await pool.query('SELECT m.course_id, count(l.id) as total FROM lessons l JOIN modules m ON l.module_id = m.id WHERE m.course_id = ANY($1) GROUP BY m.course_id', [pIds]);
+      const totals = totalRes.rows.reduce((acc, t) => ({...acc, [t.course_id]: parseInt(t.total)}), {});
+
+      let completed = {};
+      let maxScores = {};
+      let hasCerts = {};
+
+      if (pEnrollIds.length > 0) {
+        const completedRes = await pool.query(`
+          SELECT lp.enrollment_id, count(lp.id) as completed 
+          FROM lesson_progress lp 
+          JOIN lessons l ON lp.lesson_id = l.id 
+          JOIN modules m ON l.module_id = m.id 
+          WHERE lp.enrollment_id = ANY($1) AND lp.is_completed = true 
+          GROUP BY lp.enrollment_id
+        `, [pEnrollIds]);
+        completedRes.rows.forEach(r => completed[r.enrollment_id] = parseInt(r.completed));
+
+        const quizCheck = await pool.query('SELECT enrollment_id, MAX(score) as max_score FROM quiz_attempts WHERE enrollment_id = ANY($1) GROUP BY enrollment_id', [pEnrollIds]);
+        quizCheck.rows.forEach(r => maxScores[r.enrollment_id] = r.max_score);
+
+        const certCheck = await pool.query('SELECT enrollment_id FROM certificate_requests WHERE enrollment_id = ANY($1) AND status = $2', [pEnrollIds, 'APPROVED']);
+        certCheck.rows.forEach(r => hasCerts[r.enrollment_id] = true);
+      }
+
       for (const row of prereqResult.rows) {
         const pId = row.prerequisite_id;
-        const pCheck = await pool.query('SELECT id, completed_at FROM enrollments WHERE student_id = $1 AND course_id = $2', [studentId, pId]);
+        const enrollment = enrollments[pId];
         let isCompleted = false;
         let reasons = [];
         
-        if (pCheck.rows.length > 0) {
-           const pEnrollId = pCheck.rows[0].id;
+        if (enrollment) {
+           const pEnrollId = enrollment.id;
            
-           // Calculate progress dynamically
-           const totalRes = await pool.query('SELECT count(l.id) as total FROM lessons l JOIN modules m ON l.module_id = m.id WHERE m.course_id = $1', [pId]);
-           const totalLessons = parseInt(totalRes.rows[0].total) || 0;
-           const completedRes = await pool.query('SELECT count(lp.id) as completed FROM lesson_progress lp JOIN lessons l ON lp.lesson_id = l.id JOIN modules m ON l.module_id = m.id WHERE lp.enrollment_id = $1 AND lp.is_completed = true AND m.course_id = $2', [pEnrollId, pId]);
-           const completedLessons = parseInt(completedRes.rows[0].completed) || 0;
+           const totalLessons = totals[pId] || 0;
+           const completedLessons = completed[pEnrollId] || 0;
            const progress = totalLessons > 0 ? Math.floor((completedLessons / totalLessons) * 100) : 0;
            
            let meetsProgress = progress >= row.minimum_completion_percentage;
@@ -894,8 +926,7 @@ const enrollCourse = async (req, res) => {
            
            let meetsQuiz = true;
            if (row.minimum_quiz_score > 0) {
-              const quizCheck = await pool.query('SELECT MAX(score) as max_score FROM quiz_attempts WHERE enrollment_id = $1', [pEnrollId]);
-              const maxScore = quizCheck.rows[0]?.max_score || 0;
+              const maxScore = maxScores[pEnrollId] || 0;
               if (maxScore < row.minimum_quiz_score) {
                  meetsQuiz = false;
                  reasons.push(`Requires quiz score of ${row.minimum_quiz_score}% (Current: ${maxScore}%)`);
@@ -903,21 +934,18 @@ const enrollCourse = async (req, res) => {
            }
            
            let meetsCert = true;
+           const hasCert = !!hasCerts[pEnrollId];
            if (row.certificate_required) {
-              const certCheck = await pool.query('SELECT status FROM certificate_requests WHERE enrollment_id = $1 AND status = $2', [pEnrollId, 'APPROVED']);
-              if (certCheck.rows.length === 0) {
+              if (!hasCert) {
                  meetsCert = false;
                  reasons.push('Requires an approved certificate');
               }
            }
            
-           // If they have completed_at, they are done by default UNLESS strict rules fail
            const validation = await canRequestCertificate(pId, studentId);
-           if ((validation.canRequest || pCheck.rows[0].completed_at) && meetsProgress && meetsQuiz && meetsCert) {
+           if ((validation.canRequest || enrollment.completed_at) && meetsProgress && meetsQuiz && meetsCert) {
              isCompleted = true;
            } else if (meetsProgress && meetsQuiz && meetsCert) {
-             // Or if no completion timestamp but they strictly meet all set advanced rules
-             // If all rules were 0/false, they still need to "complete" it normally
              if (row.minimum_completion_percentage > 0 || row.minimum_quiz_score > 0 || row.certificate_required) {
                 isCompleted = true;
              }
@@ -927,8 +955,7 @@ const enrollCourse = async (req, res) => {
         }
         
         if (!isCompleted) {
-          const cNameRes = await pool.query('SELECT title FROM courses WHERE id = $1', [pId]);
-          missingPrereqs.push({ id: pId, title: cNameRes.rows[0]?.title || 'Unknown Course', reasons });
+          missingPrereqs.push({ id: pId, title: courseNames[pId] || 'Unknown Course', reasons });
         }
       }
 
@@ -1323,6 +1350,51 @@ app.get('/api/courses/enrollments', authMiddleware(), async (req, res) => {
     `, [studentId]);
 
     const enrollments = enrollmentsRes.rows;
+    if (enrollments.length === 0) return res.json([]);
+
+    const enrollmentIds = enrollments.map(e => e.id);
+    const courseIds = enrollments.map(e => e.course_id);
+
+    // 1. Fetch ALL modules for these courses
+    const modulesRes = await pool.query('SELECT * FROM modules WHERE course_id = ANY($1) ORDER BY "order" ASC', [courseIds]);
+    const allModules = modulesRes.rows;
+    const moduleIds = allModules.map(m => m.id);
+
+    let allLessons = [];
+    let allQuizzes = [];
+    let allQuestions = [];
+
+    if (moduleIds.length > 0) {
+      // 2. Fetch ALL lessons
+      const lessonsRes = await pool.query('SELECT * FROM lessons WHERE module_id = ANY($1) ORDER BY "order" ASC', [moduleIds]);
+      allLessons = lessonsRes.rows;
+
+      // 3. Fetch ALL quizzes
+      const quizzesRes = await pool.query('SELECT * FROM quizzes WHERE module_id = ANY($1)', [moduleIds]);
+      allQuizzes = quizzesRes.rows;
+      const quizIds = allQuizzes.map(q => q.id);
+
+      // 4. Fetch ALL questions
+      if (quizIds.length > 0) {
+        const questionsRes = await pool.query('SELECT * FROM questions WHERE quiz_id = ANY($1)', [quizIds]);
+        allQuestions = questionsRes.rows;
+      }
+    }
+
+    // 5. Fetch ALL progress, quiz attempts, assessments, submissions, and course exams
+    const progressRes = await pool.query('SELECT enrollment_id, lesson_id as lesson, is_completed FROM lesson_progress WHERE enrollment_id = ANY($1)', [enrollmentIds]);
+    const quizAttRes = await pool.query('SELECT enrollment_id, quiz_id as quiz, passed, score, total_questions FROM quiz_attempts WHERE enrollment_id = ANY($1)', [enrollmentIds]);
+    const assessRes = await pool.query('SELECT * FROM assessments WHERE course_id = ANY($1) ORDER BY id ASC', [courseIds]);
+    const subRes = await pool.query('SELECT * FROM assessment_submissions WHERE enrollment_id = ANY($1)', [enrollmentIds]);
+    const examRes = await pool.query('SELECT course_id, id FROM course_exams WHERE course_id = ANY($1) AND status = $2 AND is_deleted = false', [courseIds, 'PUBLISHED']);
+    const examAttRes = await pool.query(`
+      SELECT a.*, ce.course_id 
+      FROM course_exam_attempts a
+      JOIN course_exams ce ON a.exam_id = ce.id
+      WHERE a.student_id = $1 AND ce.course_id = ANY($2)
+    `, [studentId, courseIds]);
+
+    // Now stitch everything together in memory!
     for (let e of enrollments) {
       e.course = {
         id: e.course_id, title: e.course_title,
@@ -1330,55 +1402,26 @@ app.get('/api/courses/enrollments', authMiddleware(), async (req, res) => {
         instructor: { full_name: e.instructor_name }
       };
 
-      // fetch modules
-      const modulesRes = await pool.query('SELECT * FROM modules WHERE course_id = $1 ORDER BY "order" ASC', [e.course_id]);
-      e.course.modules = modulesRes.rows;
-
-      if (e.course.modules.length > 0) {
-        const moduleIds = e.course.modules.map(m => m.id);
-        const lessonsRes = await pool.query(`SELECT * FROM lessons WHERE module_id = ANY($1) ORDER BY "order" ASC`, [moduleIds]);
-        const quizzesRes = await pool.query(`SELECT * FROM quizzes WHERE module_id = ANY($1)`, [moduleIds]);
-
-        // Fetch questions for each quiz
-        for (let quiz of quizzesRes.rows) {
-          const questionsRes = await pool.query('SELECT * FROM questions WHERE quiz_id = $1', [quiz.id]);
-          quiz.questions = questionsRes.rows;
-        }
-
-        e.course.modules.forEach(m => {
-          m.lessons = lessonsRes.rows.filter(l => l.module_id === m.id);
-          m.quizzes = quizzesRes.rows.filter(q => q.module_id === m.id);
-        });
-      }
-
-      // fetch progress
-      const progressRes = await pool.query('SELECT lesson_id as lesson, is_completed FROM lesson_progress WHERE enrollment_id = $1', [e.id]);
-      e.lesson_progress = progressRes.rows;
-
-      // fetch quiz attempts
-      const quizAttRes = await pool.query('SELECT quiz_id as quiz, passed, score, total_questions FROM quiz_attempts WHERE enrollment_id = $1', [e.id]);
-      e.quiz_attempts = quizAttRes.rows;
-
-      // fetch assessments
-      const assessRes = await pool.query('SELECT * FROM assessments WHERE course_id = $1 ORDER BY id ASC', [e.course_id]);
-      e.course.assessments = assessRes.rows;
-
-      // fetch assessment submissions
-      const subRes = await pool.query('SELECT * FROM assessment_submissions WHERE enrollment_id = $1', [e.id]);
-      e.assessment_submissions = subRes.rows;
-
-      // fetch course exam attempts
-      const examRes = await pool.query('SELECT id FROM course_exams WHERE course_id = $1 AND status = $2 AND is_deleted = false', [e.course_id, 'PUBLISHED']);
-      e.course.has_course_exam = examRes.rows.length > 0;
+      const courseModules = allModules.filter(m => m.course_id === e.course_id);
       
-      const examAttRes = await pool.query(`
-        SELECT a.* 
-        FROM course_exam_attempts a
-        JOIN course_exams ce ON a.exam_id = ce.id
-        WHERE a.student_id = $1 AND ce.course_id = $2
-      `, [studentId, e.course_id]);
-      e.course_exam_attempts = examAttRes.rows;
+      courseModules.forEach(m => {
+        m.lessons = allLessons.filter(l => l.module_id === m.id);
+        m.quizzes = allQuizzes.filter(q => q.module_id === m.id).map(q => ({
+          ...q,
+          questions: allQuestions.filter(qst => qst.quiz_id === q.id)
+        }));
+      });
+      e.course.modules = courseModules;
+
+      e.lesson_progress = progressRes.rows.filter(p => p.enrollment_id === e.id).map(({enrollment_id, ...rest}) => rest);
+      e.quiz_attempts = quizAttRes.rows.filter(qa => qa.enrollment_id === e.id).map(({enrollment_id, ...rest}) => rest);
+      e.course.assessments = assessRes.rows.filter(a => a.course_id === e.course_id);
+      e.assessment_submissions = subRes.rows.filter(s => s.enrollment_id === e.id);
+      
+      e.course.has_course_exam = examRes.rows.some(ex => ex.course_id === e.course_id);
+      e.course_exam_attempts = examAttRes.rows.filter(ea => ea.course_id === e.course_id).map(({course_id, ...rest}) => rest);
     }
+
     res.json(enrollments);
   } catch (err) {
     console.error('ENROLLMENTS ERROR:', err.message, err.stack);
@@ -1788,22 +1831,25 @@ app.get('/api/public/stats', async (req, res) => {
 app.get('/api/plans', async (req, res) => {
   try {
     const { plan_type } = req.query;
-    let query = 'SELECT * FROM subscription_plans';
+    let query = `
+      SELECT sp.*, 
+             COALESCE(
+               json_agg(
+                 json_build_object('feature_name', pf.feature_name, 'feature_value', pf.feature_value)
+               ) FILTER (WHERE pf.feature_name IS NOT NULL), '[]'
+             ) as features
+      FROM subscription_plans sp
+      LEFT JOIN plan_features pf ON sp.id = pf.plan_id
+    `;
     let params = [];
     if (plan_type) {
-      query += ' WHERE plan_type = $1';
+      query += ' WHERE sp.plan_type = $1';
       params.push(plan_type);
     }
-    query += ' ORDER BY price ASC';
-    const result = await pool.query(query, params);
+    query += ' GROUP BY sp.id ORDER BY sp.price ASC';
     
-    // Fetch features for each plan
-    const plans = result.rows;
-    for (let plan of plans) {
-      const featuresRes = await pool.query('SELECT feature_name, feature_value FROM plan_features WHERE plan_id = $1', [plan.id]);
-      plan.features = featuresRes.rows;
-    }
-    res.json(plans);
+    const result = await pool.query(query, params);
+    res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error fetching plans' });
